@@ -20,14 +20,28 @@ export const UserModel = {
 };
 
 /**
- * Child model
- * Extends the user model with child-specific fields
+ * Child Profile model
+ * Represents a child profile in the system
  */
-export const ChildModel = {
-  ...UserModel,
-  role: 'child',
-  username: '', // Username for login
-  parentId: '', // Reference to the parent user
+export const ChildProfileModel = {
+  id: '', // Unique identifier
+  familyId: '', // Reference to the family document
+  firstName: '', // First name
+  lastName: '', // Last name
+  pin: '', // PIN code for login (4 digits)
+  avatarColor: '', // Color for avatar
+  createdAt: null, // Timestamp
+  updatedAt: null, // Timestamp
+};
+
+/**
+ * Session model
+ * Represents a user session (for child profiles)
+ */
+export const SessionModel = {
+  familyId: '', // Reference to the family document
+  childId: '', // Reference to the child profile
+  expiresAt: null, // Timestamp when session expires
 };
 
 /**
@@ -139,16 +153,33 @@ export const createUser = (data) => {
 };
 
 /**
- * Create a new child user object
- * @param {Object} data - Child user data
- * @returns {Object} - New child user object
+ * Create a new child profile object
+ * @param {Object} data - Child profile data
+ * @returns {Object} - New child profile object
  */
-export const createChild = (data) => {
+export const createChildProfile = (data) => {
   return {
-    ...ChildModel,
+    ...ChildProfileModel,
     ...data,
     createdAt: new Date(),
     updatedAt: new Date(),
+  };
+};
+
+/**
+ * Create a new session object
+ * @param {Object} data - Session data
+ * @param {number} expirationHours - Hours until session expires (default: 24)
+ * @returns {Object} - New session object
+ */
+export const createSession = (data, expirationHours = 24) => {
+  const expiresAt = new Date();
+  expiresAt.setHours(expiresAt.getHours() + expirationHours);
+  
+  return {
+    ...SessionModel,
+    ...data,
+    expiresAt,
   };
 };
 

@@ -65,41 +65,7 @@ export const updateInterestRate = async (childId, interestRate) => {
       updatedAt: serverTimestamp()
     });
     
-    // Get child data to send notification
-    const childDoc = await getDoc(doc(db, 'users', childId));
-    
-    if (!childDoc.exists()) {
-      throw new Error('Child not found');
-    }
-    
-    const childData = childDoc.data();
-    
-    // Create notification for child
-    await createNotification({
-      userId: childId,
-      title: 'Interest Rate Updated',
-      message: `Your Ribbit Reserve interest rate has been updated to ${(interestRate * 100).toFixed(1)}%.`,
-      type: 'interest_rate_updated',
-      relatedId: rewardBankId
-    });
-    
-    // Get family data to get parent ID
-    const familyDoc = await getDoc(doc(db, 'families', childData.familyId));
-    
-    if (!familyDoc.exists()) {
-      throw new Error('Family not found');
-    }
-    
-    const familyData = familyDoc.data();
-    
-    // Create notification for parent
-    await createNotification({
-      userId: familyData.mainParentId,
-      title: 'Interest Rate Updated',
-      message: `You updated ${childData.firstName}'s Ribbit Reserve interest rate to ${(interestRate * 100).toFixed(1)}%.`,
-      type: 'interest_rate_updated',
-      relatedId: rewardBankId
-    });
+    return true;
   } catch (error) {
     console.error('Error updating interest rate:', error);
     throw error;
@@ -142,14 +108,7 @@ export const applyInterest = async (childId) => {
       updatedAt: serverTimestamp()
     });
     
-    // Create notification for child
-    await createNotification({
-      userId: childId,
-      title: 'Interest Applied',
-      message: `You earned ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(interestAmount)} in interest on your Ribbit Reserve!`,
-      type: 'interest_applied',
-      relatedId: rewardBankId
-    });
+    return true;
   } catch (error) {
     console.error('Error applying interest:', error);
     throw error;
@@ -157,12 +116,12 @@ export const applyInterest = async (childId) => {
 };
 
 /**
- * Redeem money from a child's reward bank
+ * Dispense money from a child's reward bank (for parents)
  * @param {string} childId - Child ID
- * @param {number} amount - Amount to redeem
- * @returns {Promise<void>}
+ * @param {number} amount - Amount to dispense
+ * @returns {Promise<boolean>} - Success status
  */
-export const redeemMoneyReward = async (childId, amount) => {
+export const dispenseMoneyReward = async (childId, amount) => {
   try {
     // Get child's reward bank
     const rewardBanksQuery = query(
@@ -188,57 +147,24 @@ export const redeemMoneyReward = async (childId, amount) => {
     // Update balance
     await updateDoc(doc(db, 'rewardBanks', rewardBankId), {
       'money.balance': rewardBankData.money.balance - amount,
+      'money.dispensedTotal': (rewardBankData.money.dispensedTotal || 0) + amount,
       updatedAt: serverTimestamp()
     });
     
-    // Get child data
-    const childDoc = await getDoc(doc(db, 'users', childId));
-    
-    if (!childDoc.exists()) {
-      throw new Error('Child not found');
-    }
-    
-    const childData = childDoc.data();
-    
-    // Get family data to get parent ID
-    const familyDoc = await getDoc(doc(db, 'families', childData.familyId));
-    
-    if (!familyDoc.exists()) {
-      throw new Error('Family not found');
-    }
-    
-    const familyData = familyDoc.data();
-    
-    // Create notification for parent
-    await createNotification({
-      userId: familyData.mainParentId,
-      title: 'Money Redemption Request',
-      message: `${childData.firstName} wants to redeem ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)} from their Ribbit Reserve.`,
-      type: 'money_redemption',
-      relatedId: rewardBankId
-    });
-    
-    // Create notification for child
-    await createNotification({
-      userId: childId,
-      title: 'Money Redemption Requested',
-      message: `You requested to redeem ${new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)} from your Ribbit Reserve. Your parent has been notified.`,
-      type: 'money_redemption',
-      relatedId: rewardBankId
-    });
+    return true;
   } catch (error) {
-    console.error('Error redeeming money reward:', error);
+    console.error('Error dispensing money reward:', error);
     throw error;
   }
 };
 
 /**
- * Redeem points from a child's reward bank
+ * Dispense points from a child's reward bank (for parents)
  * @param {string} childId - Child ID
- * @param {number} points - Points to redeem
- * @returns {Promise<void>}
+ * @param {number} points - Points to dispense
+ * @returns {Promise<boolean>} - Success status
  */
-export const redeemPointsReward = async (childId, points) => {
+export const dispensePointsReward = async (childId, points) => {
   try {
     // Get child's reward bank
     const rewardBanksQuery = query(
@@ -264,46 +190,80 @@ export const redeemPointsReward = async (childId, points) => {
     // Update balance
     await updateDoc(doc(db, 'rewardBanks', rewardBankId), {
       'points.balance': rewardBankData.points.balance - points,
+      'points.dispensedTotal': (rewardBankData.points.dispensedTotal || 0) + points,
       updatedAt: serverTimestamp()
     });
     
-    // Get child data
-    const childDoc = await getDoc(doc(db, 'users', childId));
-    
-    if (!childDoc.exists()) {
-      throw new Error('Child not found');
-    }
-    
-    const childData = childDoc.data();
-    
-    // Get family data to get parent ID
-    const familyDoc = await getDoc(doc(db, 'families', childData.familyId));
-    
-    if (!familyDoc.exists()) {
-      throw new Error('Family not found');
-    }
-    
-    const familyData = familyDoc.data();
-    
-    // Create notification for parent
-    await createNotification({
-      userId: familyData.mainParentId,
-      title: 'Points Redemption Request',
-      message: `${childData.firstName} wants to redeem ${points} points from their Ribbit Reserve.`,
-      type: 'points_redemption',
-      relatedId: rewardBankId
-    });
-    
-    // Create notification for child
-    await createNotification({
-      userId: childId,
-      title: 'Points Redemption Requested',
-      message: `You requested to redeem ${points} points from your Ribbit Reserve. Your parent has been notified.`,
-      type: 'points_redemption',
-      relatedId: rewardBankId
-    });
+    return true;
   } catch (error) {
-    console.error('Error redeeming points reward:', error);
+    console.error('Error dispensing points reward:', error);
+    throw error;
+  }
+};
+
+/**
+ * Dispense a special reward from a child's reward bank (for parents)
+ * @param {string} childId - Child ID
+ * @param {string} rewardId - Special reward ID
+ * @returns {Promise<boolean>} - Success status
+ */
+export const dispenseSpecialReward = async (childId, rewardId) => {
+  try {
+    // Get child's reward bank
+    const rewardBanksQuery = query(
+      collection(db, 'rewardBanks'),
+      where('childId', '==', childId)
+    );
+    
+    const querySnapshot = await getDocs(rewardBanksQuery);
+    
+    if (querySnapshot.empty) {
+      throw new Error('Reward bank not found');
+    }
+    
+    const rewardBankDoc = querySnapshot.docs[0];
+    const rewardBankData = rewardBankDoc.data();
+    const rewardBankId = rewardBankDoc.id;
+    
+    // Find the special reward
+    const specialRewardIndex = rewardBankData.specialRewards.findIndex(
+      reward => reward.id === rewardId
+    );
+    
+    if (specialRewardIndex === -1) {
+      throw new Error('Special reward not found');
+    }
+    
+    const specialReward = rewardBankData.specialRewards[specialRewardIndex];
+    
+    // Verify reward is available and not already dispensed
+    if (specialReward.status !== 'available') {
+      throw new Error('Special reward is not available');
+    }
+    
+    // Update reward status with additional checks to prevent duplicates
+    const updatedSpecialRewards = rewardBankData.specialRewards.map(reward => {
+      if (reward.id === rewardId) {
+        // Ensure only one reward with this ID can be dispensed
+        return {
+          ...reward,
+          status: 'pending_redemption',
+          dispensedAt: new Date(),
+          // Add a unique transaction ID to track this specific dispensation
+          transactionId: `${rewardId}_${Date.now()}`
+        };
+      }
+      return reward;
+    });
+    
+    await updateDoc(doc(db, 'rewardBanks', rewardBankId), {
+      specialRewards: updatedSpecialRewards,
+      updatedAt: serverTimestamp()
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Error dispensing special reward:', error);
     throw error;
   }
 };
@@ -361,41 +321,7 @@ export const redeemSpecialReward = async (childId, rewardId) => {
       updatedAt: serverTimestamp()
     });
     
-    // Get child data
-    const childDoc = await getDoc(doc(db, 'users', childId));
-    
-    if (!childDoc.exists()) {
-      throw new Error('Child not found');
-    }
-    
-    const childData = childDoc.data();
-    
-    // Get family data to get parent ID
-    const familyDoc = await getDoc(doc(db, 'families', childData.familyId));
-    
-    if (!familyDoc.exists()) {
-      throw new Error('Family not found');
-    }
-    
-    const familyData = familyDoc.data();
-    
-    // Create notification for parent
-    await createNotification({
-      userId: familyData.mainParentId,
-      title: 'Special Reward Redemption Request',
-      message: `${childData.firstName} wants to redeem the special reward: ${specialReward.title}`,
-      type: 'special_redemption',
-      relatedId: rewardId
-    });
-    
-    // Create notification for child
-    await createNotification({
-      userId: childId,
-      title: 'Special Reward Redemption Requested',
-      message: `You requested to redeem the special reward: ${specialReward.title}. Your parent has been notified.`,
-      type: 'special_redemption',
-      relatedId: rewardId
-    });
+    return true;
   } catch (error) {
     console.error('Error redeeming special reward:', error);
     throw error;
@@ -445,35 +371,42 @@ export const approveRewardRedemption = async (childId, rewardId, type) => {
         throw new Error('Special reward is not pending redemption');
       }
       
-      // Update reward status
-      const updatedSpecialRewards = [...rewardBankData.specialRewards];
-      updatedSpecialRewards[specialRewardIndex] = {
-        ...specialReward,
-        status: 'redeemed'
-      };
+      // Update reward status with additional checks to prevent duplicates
+      const updatedSpecialRewards = rewardBankData.specialRewards.map(reward => {
+        if (reward.id === rewardId) {
+          // Ensure only one reward with this transaction ID can be redeemed
+          return {
+            ...reward,
+            status: 'redeemed',
+            redeemedAt: new Date(),
+            // Preserve the original transaction ID for tracking
+            transactionId: reward.transactionId || `${rewardId}_${Date.now()}`
+          };
+        }
+        return reward;
+      });
+      
+      // Remove any duplicate rewards with the same ID
+      const uniqueSpecialRewards = updatedSpecialRewards.reduce((acc, reward) => {
+        const existingRewardIndex = acc.findIndex(r => 
+          r.id === reward.id && r.transactionId === reward.transactionId
+        );
+        
+        if (existingRewardIndex === -1) {
+          acc.push(reward);
+        }
+        
+        return acc;
+      }, []);
       
       await updateDoc(doc(db, 'rewardBanks', rewardBankId), {
-        specialRewards: updatedSpecialRewards,
+        specialRewards: uniqueSpecialRewards,
         updatedAt: serverTimestamp()
       });
       
-      // Create notification for child
-      await createNotification({
-        userId: childId,
-        title: 'Special Reward Redemption Approved',
-        message: `Your special reward "${specialReward.title}" has been approved!`,
-        type: 'special_redemption_approved',
-        relatedId: rewardId
-      });
+      return true;
     } else {
-      // Create notification for child
-      await createNotification({
-        userId: childId,
-        title: `${type === 'money' ? 'Money' : 'Points'} Redemption Approved`,
-        message: `Your ${type === 'money' ? 'money' : 'points'} redemption has been approved!`,
-        type: `${type}_redemption_approved`,
-        relatedId: rewardBankId
-      });
+      return true;
     }
   } catch (error) {
     console.error('Error approving reward redemption:', error);
@@ -488,24 +421,53 @@ export const approveRewardRedemption = async (childId, rewardId, type) => {
  */
 export const getRewardsByFamilyId = async (familyId) => {
   try {
-    // Get all children in the family
+    // Get all children in the family - first try the children collection
     const childrenQuery = query(
+      collection(db, 'children'),
+      where('familyId', '==', familyId)
+    );
+    
+    const childrenSnapshot = await getDocs(childrenQuery);
+    const children = childrenSnapshot.docs.map(doc => ({...doc.data(), id: doc.id}));
+    
+    // Also check the users collection for any children (old system)
+    const usersQuery = query(
       collection(db, 'users'),
       where('familyId', '==', familyId),
       where('role', '==', 'child')
     );
     
-    const childrenSnapshot = await getDocs(childrenQuery);
-    const children = childrenSnapshot.docs.map(doc => doc.data());
+    const usersSnapshot = await getDocs(usersQuery);
+    const childUsers = usersSnapshot.docs.map(doc => ({...doc.data(), id: doc.id}));
+    
+    // Combine both results
+    const allChildren = [...children, ...childUsers];
+    
+    console.log('Found children in family:', allChildren);
     
     // Get reward banks for all children
     const rewardBanks = await Promise.all(
-      children.map(async (child) => {
+      allChildren.map(async (child) => {
         try {
-          const rewardBank = await getRewardBankByChildId(child.id);
+          console.log(`Getting reward bank for child ${child.id}`);
+          const rewardBanksQuery = query(
+            collection(db, 'rewardBanks'),
+            where('childId', '==', child.id)
+          );
+          
+          const rewardBankSnapshot = await getDocs(rewardBanksQuery);
+          
+          if (rewardBankSnapshot.empty) {
+            console.log(`No reward bank found for child ${child.id}`);
+            return null;
+          }
+          
+          const rewardBank = rewardBankSnapshot.docs[0].data();
+          
+          console.log(`Found reward bank for child ${child.id}:`, rewardBank);
           return {
             ...rewardBank,
-            childName: `${child.firstName} ${child.lastName}`,
+            childName: `${child.firstName} ${child.lastName || ''}`,
             childId: child.id
           };
         } catch (error) {

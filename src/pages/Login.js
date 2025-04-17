@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import styled from 'styled-components';
 import { signInParent } from '../services/authService';
@@ -136,12 +136,24 @@ const Login = ({ alerts }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
   
   const navigate = useNavigate();
   const location = useLocation();
   
   // Get redirect path from location state or default to dashboard
   const from = location.state?.from?.pathname || '/parent-dashboard';
+  
+  // Check for message and email in location state (from adding a parent)
+  useEffect(() => {
+    if (location.state?.message) {
+      setMessage(location.state.message);
+    }
+    
+    if (location.state?.email) {
+      setEmail(location.state.email);
+    }
+  }, [location.state]);
   
   // Handle form submission
   const handleSubmit = async (e) => {
@@ -195,6 +207,19 @@ const Login = ({ alerts }) => {
       
       <LoginForm onSubmit={handleSubmit}>
         <Heading>Parent Login</Heading>
+        
+        {message && (
+          <div style={{ 
+            backgroundColor: '#E8F5E9', 
+            color: '#388E3C', 
+            padding: '0.75rem', 
+            borderRadius: 'var(--border-radius-md)', 
+            marginBottom: '1.5rem', 
+            fontSize: '0.9rem' 
+          }}>
+            {message}
+          </div>
+        )}
         
         {error && <ErrorMessage>{error}</ErrorMessage>}
         

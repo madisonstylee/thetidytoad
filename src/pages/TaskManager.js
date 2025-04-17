@@ -225,6 +225,14 @@ const TaskStatus = styled.span`
   }};
 `;
 
+// Styled section title
+const SectionTitle = styled.h2`
+  font-size: 1.5rem;
+  color: var(--primary-color);
+  margin-bottom: 1.5rem;
+  font-family: var(--font-family-fun);
+`;
+
 // Styled empty state
 const EmptyState = styled.div`
   text-align: center;
@@ -375,6 +383,7 @@ const TaskManager = ({ alerts }) => {
   } = useTask();
   
   const [activeTab, setActiveTab] = useState('all');
+  const [activeChildId, setActiveChildId] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [modalMode, setModalMode] = useState('create');
   const [selectedTask, setSelectedTask] = useState(null);
@@ -402,12 +411,15 @@ const TaskManager = ({ alerts }) => {
           const childrenData = await getChildrenByFamilyId(userData.familyId);
           setChildren(childrenData);
           
-          // Set default assignedTo if there are children
-          if (childrenData.length > 0 && !formData.assignedTo) {
+          // Set default assignedTo and activeChildId if there are children
+          if (childrenData.length > 0) {
             setFormData(prev => ({
               ...prev,
               assignedTo: childrenData[0].id
             }));
+            
+            // Set the first child as active by default
+            setActiveChildId(childrenData[0].id);
           }
         } catch (error) {
           console.error('Error loading children:', error);
@@ -647,14 +659,14 @@ const TaskManager = ({ alerts }) => {
     }
   };
   
-  // Filter tasks based on active tab
-  const filteredTasks = activeTab === 'pending' 
-    ? tasks.filter(task => task.status === 'pending')
-    : activeTab === 'completed' 
-      ? tasks.filter(task => task.status === 'completed')
-      : activeTab === 'approved' 
-        ? tasks.filter(task => task.status === 'approved')
-        : tasks;
+  // Filter tasks based on active tab and selected child
+  const filteredTasks = tasks
+    .filter(task => activeChildId ? task.assignedTo === activeChildId : true)
+    .filter(task => {
+      if (activeTab === 'pending') return task.status === 'pending';
+      if (activeTab === 'completed') return task.status === 'completed' || task.status === 'approved';
+      return true; // 'all' tab
+    });
   
   // Show loading indicator while data is loading
   if (loading || tasksLoading) {
@@ -707,6 +719,21 @@ const TaskManager = ({ alerts }) => {
         </TabContent>
       )}
       
+      {/* Child Selector Tabs */}
+      <SectionTitle>Select Child</SectionTitle>
+      <Tabs>
+        {children.map(child => (
+          <Tab 
+            key={child.id}
+            active={activeChildId === child.id}
+            onClick={() => setActiveChildId(child.id)}
+          >
+            {child.firstName}
+          </Tab>
+        ))}
+      </Tabs>
+      
+      {/* Task Status Tabs */}
       <Tabs>
         <Tab 
           active={activeTab === 'all'} 
@@ -725,12 +752,6 @@ const TaskManager = ({ alerts }) => {
           onClick={() => handleTabChange('completed')}
         >
           Completed
-        </Tab>
-        <Tab 
-          active={activeTab === 'approved'} 
-          onClick={() => handleTabChange('approved')}
-        >
-          Approved
         </Tab>
       </Tabs>
       

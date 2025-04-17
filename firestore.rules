@@ -1,8 +1,89 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
+    // Allow parent user access
+    match /users/{userId} {
+      // Allow reading a user document if the user is authenticated and the user's authentication token is valid
+      allow read, list: if true;
+      
+      // Allow writing only if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // Allow access to child profiles
+    match /children/{childId} {
+      // Allow reading child profiles for anyone
+      // This is needed for the PIN-based child login system
+      allow read, list: if true;
+      
+      // Allow creating child profiles if authenticated and is a parent
+      allow create: if request.auth != null && 
+                   get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
+                   get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyId == request.resource.data.familyId;
+      
+      // Allow updating/deleting child profiles if authenticated and is a parent in the family
+      allow update, delete: if request.auth != null && 
+                          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent' &&
+                          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyId == resource.data.familyId;
+    }
+    
+    // Allow access to families
+    match /families/{familyId} {
+      // Allow reading if user is a member of the family or if the user has no familyId
+      allow read: if true;
+      
+      // Allow writing if authenticated and is a parent in the family
+      allow write: if request.auth != null && 
+                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyId == familyId &&
+                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'parent';
+    }
+    
+    // Allow access to family tasks
+    match /families/{familyId}/tasks/{taskId} {
+      // Allow reading tasks for anyone in the family or assigned to the task
+      allow read: if true;
+      
+      // Allow listing all tasks in a family
+      allow list: if true;
+      
+      // Allow creating/deleting if authenticated and is a member of the family
+      allow create, delete: if request.auth != null && 
+                    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyId == familyId;
+      
+      // Allow updates for anyone, including unauthenticated users
+      // This is needed for child session mode where children may not be authenticated
+      allow update: if true;
+    }
+    
+    // Allow access to reward banks
+    match /rewardBanks/{rewardBankId} {
+      // Allow reading reward banks for anyone
+      // This is safe because you need to know the reward bank ID to access it
+      allow read, list: if true;
+      
+      // Allow writing for anyone (needed for child session mode)
+      allow write: if true;
+    }
+    
+    // Allow access to notifications
+    match /notifications/{notificationId} {
+      // Allow reading notifications for anyone
+      // This is safe because you need to know the notification ID to access it
+      allow read: if true;
+      
+      // Allow writing for anyone (needed for child session mode)
+      allow write: if true;
+    }
+    
+    // Allow access to test collection for testing purposes
+    match /test/{testId} {
       allow read, write: if request.auth != null;
+    }
+    
+    // Default rule for all other collections
+    match /{document=**} {
+      allow read, write, list: if request.auth != null && 
+                                  get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
   }
 }

@@ -3,6 +3,9 @@ import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
 import { useReward } from '../contexts/RewardContext';
 import { getChildrenByFamilyId } from '../services/authService';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '../services/firebase';
+import { updateInterestRate, dispenseMoneyReward, dispensePointsReward, dispenseSpecialReward } from '../services/rewardService';
 import Loading from '../components/Loading';
 import ToadMascot from '../components/ToadMascot';
 
@@ -498,6 +501,19 @@ const RewardManager = ({ alerts }) => {
     loadChildren();
   }, [userData]);
   
+  // Update bank settings when child is selected
+  useEffect(() => {
+    if (formData.assignedTo && familyRewards && familyRewards.length > 0) {
+      const selectedChildReward = familyRewards.find(reward => reward.childId === formData.assignedTo);
+      if (selectedChildReward && selectedChildReward.money && selectedChildReward.money.interestRate !== undefined) {
+        setBankSettings(prev => ({
+          ...prev,
+          interestRate: selectedChildReward.money.interestRate
+        }));
+      }
+    }
+  }, [formData.assignedTo, familyRewards]);
+  
   // Handle tab change
   const handleTabChange = (tab) => {
     setActiveTab(tab);
@@ -582,9 +598,47 @@ const RewardManager = ({ alerts }) => {
   // Update bank settings
   const updateBankSettings = async (familyId, settings) => {
     console.log('Updating bank settings:', settings);
-    // This function would normally call a service to update bank settings
-    // For now, we'll just log it
-    return true;
+    
+    try {
+      // Get all children in the family from both collections
+      // First, check the children collection
+      const childrenQuery = query(
+        collection(db, 'children'),
+        where('familyId', '==', familyId)
+      );
+      
+      const childrenSnapshot = await getDocs(childrenQuery);
+      const children = childrenSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      // Also check the users collection for any children (old system)
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('familyId', '==', familyId),
+        where('role', '==', 'child')
+      );
+      
+      const usersSnapshot = await getDocs(usersQuery);
+      const childUsers = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      // Combine both results
+      const allChildren = [...children, ...childUsers];
+      
+      console.log('Found children to update interest rate:', allChildren);
+      
+      // Update interest rate for the selected child only
+      await updateInterestRate(formData.assignedTo, settings.interestRate);
+      
+      return true;
+    } catch (error) {
+      console.error('Error updating bank settings:', error);
+      throw error;
+    }
   };
   
   // Handle form submission
@@ -692,17 +746,29 @@ const RewardManager = ({ alerts }) => {
     e.preventDefault();
     
     try {
+      setSubmitting(true);
+      
+      // Add additional logging
+      console.log('Submitting bank settings update:', bankSettings);
+      
       await updateBankSettings(userData.familyId, bankSettings);
+      
+      // Refresh rewards to get updated interest rates
+      await refreshRewards();
       
       if (alerts) {
         alerts.success('Bank settings updated successfully');
       }
+      
+      setSubmitting(false);
     } catch (error) {
       console.error('Error updating bank settings:', error);
       
       if (alerts) {
         alerts.error('Failed to update bank settings. Please try again.');
       }
+      
+      setSubmitting(false);
     }
   };
   
@@ -748,6 +814,171 @@ const RewardManager = ({ alerts }) => {
         </HeaderText>
       </HeaderSection>
       
+      {/* Child Selector Tabs */}
+      <SectionTitle>Ribbit Reserve by Child</SectionTitle>
+      <Tabs>
+        {children.map(child => (
+          <Tab 
+            key={child.id}
+            active={formData.assignedTo === child.id}
+            onClick={() => setFormData(prev => ({ ...prev, assignedTo: child.id }))}
+          >
+            {child.firstName}
+          </Tab>
+        ))}
+      </Tabs>
+      
+      {/* Child's Reward Bank */}
+      <TabContent>
+        {familyRewards.filter(reward => reward.childId === formData.assignedTo).map(childReward => (
+          <div key={childReward.childId}>
+            <SectionTitle>Completed Tasks</SectionTitle>
+            <RewardList>
+              {/* Display completed tasks for this child */}
+              {/* This would need to be fetched from the task service */}
+              <EmptyState>
+                <p>Completed tasks will be shown here.</p>
+              </EmptyState>
+            </RewardList>
+            
+            <SectionTitle>Current Rewards</SectionTitle>
+            <RewardList>
+              {/* Money Card */}
+              <RewardCard>
+                <RewardTitle>Money Balance</RewardTitle>
+                <RewardDescription>
+                  Current Balance: ${childReward.money?.balance?.toFixed(2) || '0.00'}<br/>
+                  Interest Rate: {((childReward.money?.interestRate || 0) * 100).toFixed(1)}%
+                </RewardDescription>
+                <RewardActions>
+                  <ActionButton 
+                    onClick={() => {
+                      const amount = prompt(`Enter amount to dispense to ${getChildName(childReward.childId)}:`);
+                      if (amount && !isNaN(parseFloat(amount)) && parseFloat(amount) > 0) {
+                        dispenseMoneyReward(childReward.childId, parseFloat(amount))
+                          .then(() => {
+                            if (alerts) {
+                              alerts.success(`Successfully dispensed $${parseFloat(amount).toFixed(2)} to ${getChildName(childReward.childId)}`);
+                            }
+                            refreshRewards();
+                          })
+                          .catch(err => {
+                            console.error('Error dispensing money:', err);
+                            if (alerts) {
+                              alerts.error(`Failed to dispense money: ${err.message}`);
+                            }
+                          });
+                      }
+                    }}
+                  >
+                    Dispense Money
+                  </ActionButton>
+                </RewardActions>
+              </RewardCard>
+              
+              {/* Points Card */}
+              <RewardCard>
+                <RewardTitle>Points Balance</RewardTitle>
+                <RewardDescription>
+                  Current Points: {childReward.points?.balance || 0}
+                </RewardDescription>
+                <RewardActions>
+                  <ActionButton 
+                    onClick={() => {
+                      const points = prompt(`Enter points to dispense to ${getChildName(childReward.childId)}:`);
+                      if (points && !isNaN(parseInt(points)) && parseInt(points) > 0) {
+                        dispensePointsReward(childReward.childId, parseInt(points))
+                          .then(() => {
+                            if (alerts) {
+                              alerts.success(`Successfully dispensed ${parseInt(points)} points to ${getChildName(childReward.childId)}`);
+                            }
+                            refreshRewards();
+                          })
+                          .catch(err => {
+                            console.error('Error dispensing points:', err);
+                            if (alerts) {
+                              alerts.error(`Failed to dispense points: ${err.message}`);
+                            }
+                          });
+                      }
+                    }}
+                  >
+                    Dispense Points
+                  </ActionButton>
+                </RewardActions>
+              </RewardCard>
+              
+              {/* Special Rewards */}
+              {childReward.specialRewards?.filter(sr => sr.status === 'available').map(specialReward => (
+                <RewardCard key={specialReward.id}>
+                  <RewardTitle>{specialReward.title}</RewardTitle>
+                  <RewardDescription>{specialReward.description}</RewardDescription>
+                  <RewardActions>
+                    <ActionButton 
+                      onClick={() => {
+                        if (window.confirm(`Dispense special reward "${specialReward.title}" to ${getChildName(childReward.childId)}?`)) {
+                          dispenseSpecialReward(childReward.childId, specialReward.id)
+                            .then(() => {
+                              if (alerts) {
+                                alerts.success(`Successfully dispensed special reward to ${getChildName(childReward.childId)}`);
+                              }
+                              refreshRewards();
+                            })
+                            .catch(err => {
+                              console.error('Error dispensing special reward:', err);
+                              if (alerts) {
+                                alerts.error(`Failed to dispense special reward: ${err.message}`);
+                              }
+                            });
+                        }
+                      }}
+                    >
+                      Dispense Reward
+                    </ActionButton>
+                  </RewardActions>
+                </RewardCard>
+              ))}
+              
+              {childReward.specialRewards?.filter(sr => sr.status === 'available').length === 0 && (
+                <EmptyState>
+                  <p>No special rewards available for this child.</p>
+                </EmptyState>
+              )}
+            </RewardList>
+          </div>
+        ))}
+      </TabContent>
+      
+      <BankSettingsSection>
+        <SectionTitle>Ribbit Reserve Settings</SectionTitle>
+        <SettingsCard>
+          <SettingsTitle>Money Settings for {getChildName(formData.assignedTo)}</SettingsTitle>
+          <SettingsForm onSubmit={handleUpdateBankSettings}>
+            <SettingsRow>
+              <SettingsLabel htmlFor="interestRate">Interest Rate (%)</SettingsLabel>
+              <SettingsInput
+                id="interestRate"
+                name="interestRate"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={bankSettings.interestRate * 100}
+                onChange={(e) => setBankSettings(prev => ({
+                  ...prev,
+                  interestRate: parseFloat(e.target.value) / 100
+                }))}
+              />
+            </SettingsRow>
+            <SettingsActions>
+              <SubmitButton type="submit">
+                Save Settings
+              </SubmitButton>
+            </SettingsActions>
+          </SettingsForm>
+        </SettingsCard>
+      </BankSettingsSection>
+      
       {pendingRedemptions.length > 0 && (
         <TabContent>
           <SectionTitle>Pending Redemptions</SectionTitle>
@@ -779,6 +1010,7 @@ const RewardManager = ({ alerts }) => {
         </TabContent>
       )}
       
+      <SectionTitle>Special Rewards</SectionTitle>
       <Tabs>
         <Tab 
           active={activeTab === 'pending'} 
@@ -850,36 +1082,6 @@ const RewardManager = ({ alerts }) => {
           </EmptyState>
         )}
       </TabContent>
-      
-      <BankSettingsSection>
-        <SectionTitle>Ribbit Reserve Settings</SectionTitle>
-        <SettingsCard>
-          <SettingsTitle>Money Settings</SettingsTitle>
-          <SettingsForm onSubmit={handleUpdateBankSettings}>
-            <SettingsRow>
-              <SettingsLabel htmlFor="interestRate">Interest Rate (%)</SettingsLabel>
-              <SettingsInput
-                id="interestRate"
-                name="interestRate"
-                type="number"
-                min="0"
-                max="100"
-                step="0.1"
-                value={bankSettings.interestRate * 100}
-                onChange={(e) => setBankSettings(prev => ({
-                  ...prev,
-                  interestRate: parseFloat(e.target.value) / 100
-                }))}
-              />
-            </SettingsRow>
-            <SettingsActions>
-              <SubmitButton type="submit">
-                Save Settings
-              </SubmitButton>
-            </SettingsActions>
-          </SettingsForm>
-        </SettingsCard>
-      </BankSettingsSection>
       
       {/* Create/Edit Reward Modal */}
       {showModal && (

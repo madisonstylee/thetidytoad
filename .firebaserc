@@ -1,5 +1,8 @@
 {
   "projects": {
-    "default": "the-tidy-toad"
-  }
+    "default": "the-tidy-toad",
+    "staging": "the-tidy-toad"
+  },
+  "targets": {},
+  "etags": {}
 }

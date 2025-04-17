@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import AppContextProvider from './contexts/AppContextProvider';
 import './index.css';
+import './mobile.css'; // Import mobile-specific styles
 
 // Create root element
 const root = ReactDOM.createRoot(document.getElementById('root'));

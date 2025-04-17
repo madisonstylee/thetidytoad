@@ -4,6 +4,7 @@ import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
 import { useNotification } from '../contexts/NotificationContext';
 import { signOutUser } from '../services/authService';
+import { clearSession } from '../services/sessionService';
 import ToadMascot from './ToadMascot';
 
 // Styled header container
@@ -22,6 +23,15 @@ const LogoContainer = styled.div`
   display: flex;
   align-items: center;
   gap: 1rem;
+`;
+
+// Styled slogan text
+const SloganText = styled.div`
+  font-family: var(--font-family-fun);
+  font-size: 0.9rem;
+  color: #E8F5E9;
+  margin-left: 0.5rem;
+  font-style: italic;
 `;
 
 // Styled logo text
@@ -49,16 +59,27 @@ const NavContainer = styled.div`
 const NavLink = styled(Link)`
   color: white;
   text-decoration: none;
-  font-weight: 500;
-  font-size: 1rem;
-  padding: 0.5rem;
-  border-radius: 4px;
-  transition: background-color 0.2s;
+  font-weight: 600;
+  font-size: 1.1rem;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  margin: 0 0.3rem;
+  font-family: var(--font-family-fun);
+  background-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s;
   
   &:hover {
-    background-color: rgba(255, 255, 255, 0.1);
+    background-color: rgba(255, 255, 255, 0.2);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
     text-decoration: none;
     color: white;
+  }
+  
+  &:active {
+    transform: translateY(0);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
 `;
 
@@ -79,6 +100,15 @@ const Button = styled.button`
 `;
 
 // Styled user info container
+const UserInfoContainer = styled.div`
+  position: relative;
+  
+  &:hover > div:last-child {
+    display: block;
+  }
+`;
+
+// Styled user info
 const UserInfo = styled.div`
   display: flex;
   align-items: center;
@@ -121,13 +151,14 @@ const UserName = styled.span`
 const DropdownMenu = styled.div`
   position: absolute;
   top: 100%;
-  right: 1rem;
+  right: 0;
   background-color: white;
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   padding: 0.5rem 0;
   z-index: 100;
   min-width: 150px;
+  display: none;
 `;
 
 // Styled dropdown item
@@ -188,30 +219,24 @@ const NotificationBadge = styled.div`
  * @returns {JSX.Element} - Rendered component
  */
 const Header = () => {
-  const { userData, isLoggedIn, isParent, isChild, childLogout } = useAuth();
+  const { userData, childProfile, isLoggedIn, isParent, isChild, clearChildMode } = useAuth();
   const { unreadCount } = useNotification();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
   const navigate = useNavigate();
-
-  // Toggle dropdown menu
-  const toggleDropdown = () => {
-    setDropdownOpen(!dropdownOpen);
-  };
-
-  // Close dropdown menu
-  const closeDropdown = () => {
-    setDropdownOpen(false);
-  };
 
   // Handle logout
   const handleLogout = async () => {
     try {
       if (isChild) {
-        childLogout();
+        // Clear child session, update auth context, and navigate to login
+        clearSession();
+        // Use clearChildMode from AuthContext to properly update the auth state
+        clearChildMode();
+        navigate('/login');
       } else {
+        // Sign out parent user
         await signOutUser();
+        navigate('/login');
       }
-      navigate('/login');
     } catch (error) {
       console.error('Error logging out:', error);
     }
@@ -219,21 +244,28 @@ const Header = () => {
 
   // Get user's initials for avatar
   const getUserInitials = () => {
-    if (!userData) return '';
-    
-    const firstName = userData.firstName || '';
-    const lastName = userData.lastName || '';
-    
-    return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+    if (isChild && childProfile) {
+      const firstName = childProfile.firstName || '';
+      const lastName = childProfile.lastName || '';
+      return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+    } else if (userData) {
+      const firstName = userData.firstName || '';
+      const lastName = userData.lastName || '';
+      return `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+    }
+    return '';
   };
 
   return (
     <HeaderContainer>
       <LogoContainer>
         <ToadMascot size={50} />
-        <LogoText to={isLoggedIn ? (isParent ? '/parent-dashboard' : '/child-dashboard') : '/'}>
-          The Tidy Toad
-        </LogoText>
+          <div>
+            <LogoText to={isLoggedIn ? (isParent ? '/parent-dashboard' : '/child-dashboard') : '/'}>
+              The Tidy Toad
+            </LogoText>
+            <SloganText>A toad-ally awesome way to manage tasks and earn rewards!</SloganText>
+          </div>
       </LogoContainer>
       
       <NavContainer>
@@ -275,29 +307,37 @@ const Header = () => {
             )}
             
             {/* User dropdown */}
-            <div style={{ position: 'relative' }}>
-              <UserInfo onClick={toggleDropdown}>
+            <UserInfoContainer>
+              <UserInfo>
                 <UserAvatar>
-                  {userData.profilePicture ? (
+                  {isChild && childProfile ? (
+                    childProfile.profilePicture ? (
+                      <img src={childProfile.profilePicture} alt={`${childProfile.firstName}'s avatar`} />
+                    ) : (
+                      getUserInitials()
+                    )
+                  ) : userData && userData.profilePicture ? (
                     <img src={userData.profilePicture} alt={`${userData.firstName}'s avatar`} />
                   ) : (
                     getUserInitials()
                   )}
                 </UserAvatar>
-                <UserName>{userData.firstName}</UserName>
+                <UserName>
+                  {isChild && childProfile ? childProfile.firstName : userData ? userData.firstName : ''}
+                </UserName>
               </UserInfo>
               
-              {dropdownOpen && (
-                <DropdownMenu>
-                  <DropdownItem to="/profile" onClick={closeDropdown}>
-                    Profile
+              <DropdownMenu>
+                {isParent && (
+                  <DropdownItem to="/profile">
+                    Family Settings
                   </DropdownItem>
-                  <DropdownButton onClick={handleLogout}>
-                    Logout
-                  </DropdownButton>
-                </DropdownMenu>
-              )}
-            </div>
+                )}
+                <DropdownButton onClick={handleLogout}>
+                  Logout
+                </DropdownButton>
+              </DropdownMenu>
+            </UserInfoContainer>
           </>
         ) : (
           <>

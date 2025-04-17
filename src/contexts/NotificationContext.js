@@ -20,7 +20,7 @@ export const useNotification = () => {
 
 // Provider component
 export const NotificationProvider = ({ children }) => {
-  const { userData } = useAuth();
+  const { userData, childProfile, authMode } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -29,7 +29,8 @@ export const NotificationProvider = ({ children }) => {
   // Load notifications when user changes
   useEffect(() => {
     const loadNotifications = async () => {
-      if (!userData) {
+      // Clear notifications if no user data or child profile
+      if (!userData && !childProfile) {
         setNotifications([]);
         setUnreadCount(0);
         setLoading(false);
@@ -40,12 +41,26 @@ export const NotificationProvider = ({ children }) => {
       setError('');
 
       try {
+        let userId;
+        
+        if (authMode === 'parent' && userData) {
+          userId = userData.id;
+        } else if (authMode === 'child' && childProfile) {
+          userId = childProfile.id;
+        } else {
+          // No valid user ID found
+          setNotifications([]);
+          setUnreadCount(0);
+          setLoading(false);
+          return;
+        }
+        
         // Get notifications for the user
-        const userNotifications = await getNotificationsByUserId(userData.id);
+        const userNotifications = await getNotificationsByUserId(userId);
         setNotifications(userNotifications);
 
         // Get unread count
-        const count = await getUnreadNotificationCount(userData.id);
+        const count = await getUnreadNotificationCount(userId);
         setUnreadCount(count);
       } catch (error) {
         console.error('Error loading notifications:', error);
@@ -56,11 +71,12 @@ export const NotificationProvider = ({ children }) => {
     };
 
     loadNotifications();
-  }, [userData]);
+  }, [userData, childProfile, authMode]);
 
   // Mark a notification as read
   const markAsRead = async (notificationId) => {
-    if (!userData) {
+    // Return if no user data or child profile
+    if (!userData && !childProfile) {
       return false;
     }
 
@@ -87,12 +103,23 @@ export const NotificationProvider = ({ children }) => {
 
   // Mark all notifications as read
   const markAllAsRead = async () => {
-    if (!userData) {
+    // Return if no user data or child profile
+    if (!userData && !childProfile) {
+      return false;
+    }
+
+    let userId;
+    
+    if (authMode === 'parent' && userData) {
+      userId = userData.id;
+    } else if (authMode === 'child' && childProfile) {
+      userId = childProfile.id;
+    } else {
       return false;
     }
 
     try {
-      await markAllNotificationsAsRead(userData.id);
+      await markAllNotificationsAsRead(userId);
       
       // Update notifications in state
       setNotifications(notifications.map(notification => ({ ...notification, read: true })));
@@ -110,7 +137,8 @@ export const NotificationProvider = ({ children }) => {
 
   // Delete a notification
   const removeNotification = async (notificationId) => {
-    if (!userData) {
+    // Return if no user data or child profile
+    if (!userData && !childProfile) {
       return false;
     }
 
@@ -138,12 +166,23 @@ export const NotificationProvider = ({ children }) => {
 
   // Delete all notifications
   const removeAllNotifications = async () => {
-    if (!userData) {
+    // Return if no user data or child profile
+    if (!userData && !childProfile) {
+      return false;
+    }
+
+    let userId;
+    
+    if (authMode === 'parent' && userData) {
+      userId = userData.id;
+    } else if (authMode === 'child' && childProfile) {
+      userId = childProfile.id;
+    } else {
       return false;
     }
 
     try {
-      await deleteAllNotifications(userData.id);
+      await deleteAllNotifications(userId);
       
       // Update notifications in state
       setNotifications([]);
@@ -161,7 +200,8 @@ export const NotificationProvider = ({ children }) => {
 
   // Refresh notifications
   const refreshNotifications = async () => {
-    if (!userData) {
+    // Return if no user data or child profile
+    if (!userData && !childProfile) {
       return;
     }
 
@@ -169,12 +209,26 @@ export const NotificationProvider = ({ children }) => {
     setError('');
 
     try {
+      let userId;
+      
+      if (authMode === 'parent' && userData) {
+        userId = userData.id;
+      } else if (authMode === 'child' && childProfile) {
+        userId = childProfile.id;
+      } else {
+        // No valid user ID found
+        setNotifications([]);
+        setUnreadCount(0);
+        setLoading(false);
+        return;
+      }
+      
       // Get notifications for the user
-      const userNotifications = await getNotificationsByUserId(userData.id);
+      const userNotifications = await getNotificationsByUserId(userId);
       setNotifications(userNotifications);
 
       // Get unread count
-      const count = await getUnreadNotificationCount(userData.id);
+      const count = await getUnreadNotificationCount(userId);
       setUnreadCount(count);
     } catch (error) {
       console.error('Error refreshing notifications:', error);
@@ -200,7 +254,8 @@ export const NotificationProvider = ({ children }) => {
     removeNotification,
     removeAllNotifications,
     refreshNotifications,
-    getUnreadNotifications
+    getUnreadNotifications,
+    fetchNotifications: refreshNotifications // Alias for refreshNotifications
   };
 
   return (

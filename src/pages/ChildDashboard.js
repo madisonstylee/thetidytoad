@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
 import { useTask } from '../contexts/TaskContext';
 import { useNotification } from '../contexts/NotificationContext';
+import { useReward } from '../contexts/RewardContext';
 import Loading from '../components/Loading';
 import ToadMascot from '../components/ToadMascot';
 import Celebration from '../components/Celebration';
@@ -91,7 +92,8 @@ const TaskCard = styled.div`
   border: 2px solid ${props => props.completed ? 'var(--success-color)' : 'var(--background-dark)'};
   border-radius: var(--border-radius-md);
   padding: 1.25rem;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.2s;
+  box-shadow: var(--box-shadow-md);
   
   &:hover {
     transform: translateY(-5px);
@@ -133,10 +135,12 @@ const TaskButton = styled.button`
   padding: 0.75rem;
   font-weight: 600;
   cursor: ${props => props.completed ? 'default' : 'pointer'};
-  transition: background-color 0.2s;
+  transition: transform 0.2s;
+  box-shadow: var(--box-shadow-md);
   
   &:hover {
-    background-color: ${props => props.completed ? 'var(--success-color)' : 'var(--accent-color-dark)'};
+    transform: translateY(-5px);
+    box-shadow: var(--box-shadow-md);
   }
   
   &:disabled {
@@ -210,18 +214,19 @@ const RewardLabel = styled.div`
  * @returns {JSX.Element} - Rendered component
  */
 const ChildDashboard = ({ alerts }) => {
-  const { userData } = useAuth();
+  const { childProfile } = useAuth();
   const { pendingTasks, completeTask, loading: tasksLoading } = useTask();
   const { unreadCount, loading: notificationsLoading } = useNotification();
+  const { rewardBank, loading: rewardLoading } = useReward();
   const [completingTaskId, setCompletingTaskId] = useState(null);
   const [showCelebration, setShowCelebration] = useState(false);
   
   // Handle task completion
   const handleCompleteTask = async (taskId) => {
     setCompletingTaskId(taskId);
-    
+
     try {
-      const success = await completeTask(userData.familyId, taskId);
+      const success = await completeTask(childProfile.familyId, taskId, childProfile.id);
       
       if (success) {
         // Show celebration animation
@@ -250,8 +255,12 @@ const ChildDashboard = ({ alerts }) => {
   };
   
   // Show loading indicator while data is loading
-  if (tasksLoading || notificationsLoading) {
-    return <Loading message="Loading dashboard..." />;
+  if (tasksLoading || notificationsLoading || rewardLoading) {
+    return (
+      <DashboardContainer>
+        <Loading message="Loading dashboard..." />
+      </DashboardContainer>
+    );
   }
   
   return (
@@ -268,7 +277,7 @@ const ChildDashboard = ({ alerts }) => {
       <WelcomeSection>
         <ToadMascot size={100} message="Hi there!" animate="jump" />
         <WelcomeText>
-          <Heading>Hi, {userData.firstName}!</Heading>
+          <Heading>Hi, {childProfile.firstName}!</Heading>
           <Subheading>Complete tasks to earn rewards in your Ribbit Reserve</Subheading>
         </WelcomeText>
       </WelcomeSection>
@@ -302,7 +311,7 @@ const ChildDashboard = ({ alerts }) => {
                     </>
                   )}
                 </TaskReward>
-                <TaskButton 
+                <TaskButton
                   onClick={() => handleCompleteTask(task.id)}
                   disabled={task.status === 'completed' || completingTaskId === task.id}
                   completed={task.status === 'completed'}
@@ -319,29 +328,32 @@ const ChildDashboard = ({ alerts }) => {
             ))
           ) : (
             <EmptyState>
-              <p>No lily pad tasks for you right now, little tadpole!</p>
-              <p>Hop back later to see what your parents have assigned!</p>
+              No lily pad tasks for you right now, little tadpole!
+              Hop back later to see what your parents have assigned!
             </EmptyState>
           )}
         </TaskList>
       </TaskSection>
       
+      <SectionHeader>
+        <SectionTitle>Ribbit Reserve</SectionTitle>
+        <SectionIcon>💰</SectionIcon>
+      </SectionHeader>
+      
       <RewardSummary>
         <RewardCard to="/ribbit-reserve">
           <RewardIcon>💰</RewardIcon>
-          <RewardValue>$0.00</RewardValue>
+          <RewardValue>${rewardBank?.money?.balance?.toFixed(2) || '0.00'}</RewardValue>
           <RewardLabel>Money</RewardLabel>
         </RewardCard>
-        
         <RewardCard to="/ribbit-reserve">
           <RewardIcon>🎮</RewardIcon>
-          <RewardValue>0</RewardValue>
+          <RewardValue>{rewardBank?.points?.balance || 0}</RewardValue>
           <RewardLabel>Points</RewardLabel>
         </RewardCard>
-        
         <RewardCard to="/ribbit-reserve">
           <RewardIcon>🎁</RewardIcon>
-          <RewardValue>0</RewardValue>
+          <RewardValue>{rewardBank?.specialRewards?.filter(reward => reward.status === 'available').length || 0}</RewardValue>
           <RewardLabel>Special Rewards</RewardLabel>
         </RewardCard>
       </RewardSummary>

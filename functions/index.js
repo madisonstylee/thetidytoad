@@ -10,13 +10,10 @@
 // Create and deploy your first functions
 // https://firebase.google.com/docs/functions/get-started
 
-// Example function (commented out for now)
-/*
-const {onRequest} = require("firebase-functions/v2/https");
-const logger = require("firebase-functions/logger");
+// This file is currently empty as we're not using any Cloud Functions yet.
+// When we need to add functions, we'll uncomment and use the appropriate imports.
 
-exports.helloWorld = onRequest((request, response) => {
-  logger.info("Hello logs!", {structuredData: true});
-  response.send("Hello from Firebase!");
-});
-*/
+// Example function (uncomment when needed)
+// exports.helloWorld = (request, response) => {
+//   response.send("Hello from Firebase!");
+// };

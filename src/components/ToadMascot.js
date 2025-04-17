@@ -100,52 +100,66 @@ const LilyPad = styled.div`
   }
 `;
 
-// Styled toad emoji
-const ToadEmoji = styled.div`
-  font-size: ${props => props.size * 0.8}px;
+// Styled toad image
+const ToadImage = styled.img`
+  width: ${props => props.size * 0.8}px;
+  height: ${props => props.size * 0.8}px;
+  position: relative;
+  bottom: -10px; /* Move the frog down to sit on the lily pad */
   animation: ${props => props.animate === 'jump' 
     ? jump 
     : breathe} 
     ${props => props.animate === 'jump' ? '0.6s' : '3s'} 
     ease-in-out 
     ${props => props.animate === 'jump' ? 'forwards' : 'infinite'};
+  z-index: 1;
+  opacity: ${props => props.loaded ? 1 : 0};
+  transition: opacity 0.3s ease-in-out;
+`;
+
+// Fallback toad component (CSS-based) in case the SVG fails to load
+const FallbackToad = styled.div`
+  width: ${props => props.size * 0.8}px;
+  height: ${props => props.size * 0.8}px;
   position: relative;
+  background-color: #4CAF50;
+  border-radius: 50%;
   z-index: 1;
   
-  /* Left eye */
   &::before {
-    content: "👁️";
+    content: "";
     position: absolute;
-    font-size: ${props => props.size * 0.2}px;
-    top: ${props => props.size * 0.35}px; /* Further lowered eyes */
-    left: ${props => props.size * 0.2}px;
-    animation: ${blink} 4s infinite;
-    z-index: 2;
+    top: 20%;
+    left: 15%;
+    width: 30%;
+    height: 20%;
+    background-color: white;
+    border-radius: 50%;
   }
   
-  /* Right eye */
   &::after {
-    content: "👁️";
+    content: "";
     position: absolute;
-    font-size: ${props => props.size * 0.2}px;
-    top: ${props => props.size * 0.35}px; /* Further lowered eyes */
-    right: ${props => props.size * 0.2}px;
-    animation: ${blink} 4s infinite;
-    z-index: 2;
+    top: 20%;
+    right: 15%;
+    width: 30%;
+    height: 20%;
+    background-color: white;
+    border-radius: 50%;
   }
 `;
 
 // Styled tongue for the toad
 const Tongue = styled.div`
   position: absolute;
-  bottom: ${props => props.size * 0.2}px;
+  top: 50%; /* Position at the middle of the frog */
   left: 50%;
   transform: translateX(-50%) scaleY(0);
   width: ${props => props.size * 0.1}px;
-  height: ${props => props.size * 0.2}px;
+  height: ${props => props.size * 0.15}px;
   background-color: #FF5252;
   border-radius: 50% 50% 10% 10%;
-  z-index: 0;
+  z-index: 2; /* Make sure tongue appears in front of the frog */
   transform-origin: top center;
   opacity: 0;
   animation: ${props => props.show ? tongue : 'none'} 0.5s ease-in-out;
@@ -154,15 +168,15 @@ const Tongue = styled.div`
 // Styled ribbit text
 const RibbitText = styled.div`
   position: absolute;
-  top: ${props => props.size * 0.1}px;
-  left: ${props => props.size * 0.8}px;
+  top: ${props => props.size * 0.2}px; /* Positioned above the frog */
+  right: ${props => props.size * 0.1}px; /* Positioned to the right of the frog */
   font-family: var(--font-family-fun);
   font-size: ${props => props.size * 0.25}px;
   font-weight: bold;
   color: var(--primary-color);
   opacity: 0;
   animation: ${props => props.show ? ribbitPop : 'none'} 2s ease-in-out;
-  z-index: 2;
+  z-index: 3; /* Make sure it appears above everything */
 `;
 
 // Styled speech bubble for the toad
@@ -172,12 +186,15 @@ const SpeechBubble = styled.div`
   right: ${props => props.size * 1.1}px; /* Moved to the left of the toad */
   background-color: #E8F5E9; /* Light green background */
   border: 2px solid #81C784; /* Green border */
-  border-radius: 20px;
-  padding: 10px 15px;
+  border-radius: 12px; /* More square-like corners */
+  padding: 12px 18px;
   font-family: var(--font-family-fun);
-  font-size: ${props => props.size * 0.2}px;
+  font-size: ${props => props.size * 0.15}px;
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-  max-width: ${props => props.size * 1.5}px;
+  width: ${props => props.size * 1.8}px; /* Fixed width instead of max-width */
+  min-height: ${props => props.size * 0.6}px; /* Minimum height */
+  display: flex;
+  align-items: center;
   z-index: 1;
   
   &::after {
@@ -225,6 +242,7 @@ const NameTag = styled.div`
  * @param {string} props.name - Optional name to display under the toad
  * @param {string} props.animate - Animation type ('idle', 'jump')
  * @param {function} props.onClick - Function to call when the toad is clicked
+ * @param {boolean} props.showRibbit - Whether to show the ribbit text (defaults to undefined)
  * @returns {JSX.Element} - Rendered component
  */
 const ToadMascot = ({ 
@@ -232,10 +250,19 @@ const ToadMascot = ({
   message = '', 
   name = '', 
   animate = 'idle',
-  onClick = null
+  onClick = null,
+  showRibbit: initialShowRibbit
 }) => {
   const [showTongue, setShowTongue] = useState(false);
-  const [showRibbit, setShowRibbit] = useState(false);
+  const [showRibbit, setShowRibbit] = useState(initialShowRibbit === undefined ? false : initialShowRibbit);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [imageError, setImageError] = useState(false);
+  
+  // Reset animations on mount and when animate prop changes
+  useEffect(() => {
+    setShowTongue(false);
+    setShowRibbit(false);
+  }, [animate]);
   
   // Randomly show tongue and ribbit animations
   useEffect(() => {
@@ -243,24 +270,28 @@ const ToadMascot = ({
     if (animate !== 'jump') {
       // Random tongue animation
       const tongueInterval = setInterval(() => {
-        if (Math.random() < 0.2) { // 20% chance
+        if (Math.random() < 0.1) { // 10% chance (reduced from 20%)
           setShowTongue(true);
           setTimeout(() => setShowTongue(false), 500);
         }
-      }, 5000);
+      }, 10000); // Increased interval from 5000ms to 10000ms
       
       // Random ribbit animation
       const ribbitInterval = setInterval(() => {
-        if (Math.random() < 0.15) { // 15% chance
+        if (Math.random() < 0.05) { // 5% chance (reduced from 15%)
           setShowRibbit(true);
           setTimeout(() => setShowRibbit(false), 2000);
         }
-      }, 8000);
+      }, 15000); // Increased interval from 8000ms to 15000ms
       
       return () => {
         clearInterval(tongueInterval);
         clearInterval(ribbitInterval);
       };
+    } else {
+      // If jumping, make sure tongue and ribbit are hidden
+      setShowTongue(false);
+      setShowRibbit(false);
     }
   }, [animate]);
   
@@ -286,21 +317,32 @@ const ToadMascot = ({
         </SpeechBubble>
       )}
       
-      <RibbitText size={size} show={showRibbit}>
-        Ribbit!
-      </RibbitText>
+      {/* Only show Ribbit text if not jumping */}
+      {animate !== 'jump' && (
+        <RibbitText size={size} show={showRibbit}>
+          Ribbit!
+        </RibbitText>
+      )}
       
       <LilyPad size={size} />
       
-      <ToadEmoji 
-        size={size} 
-        animate={animate}
-        onClick={handleClick}
-        style={{ cursor: 'pointer' }}
-      >
-        🐸
+      <div onClick={handleClick} style={{ position: 'relative', cursor: 'pointer' }}>
+        {imageError ? (
+          <FallbackToad size={size} />
+        ) : (
+          <ToadImage 
+            src="/images/frog.svg" 
+            size={size} 
+            animate={animate}
+            alt="Toad mascot"
+            loading="eager"
+            onLoad={() => setImageLoaded(true)}
+            onError={() => setImageError(true)}
+            loaded={imageLoaded}
+          />
+        )}
         <Tongue size={size} show={showTongue} />
-      </ToadEmoji>
+      </div>
       
       {name && (
         <NameTag size={size}>

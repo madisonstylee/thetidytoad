@@ -1,15 +1,15 @@
-import { 
-  collection, 
-  doc, 
-  getDoc, 
-  getDocs, 
-  setDoc, 
-  updateDoc, 
-  deleteDoc, 
-  query, 
-  where, 
-  orderBy, 
-  serverTimestamp 
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from './firebase';
@@ -25,27 +25,33 @@ import { createNotification } from './notificationService';
 export const createNewTask = async (taskData, userId) => {
   try {
     const taskId = uuidv4();
-    
+
     // Create task document
     const newTaskData = createTask({
       id: taskId,
       ...taskData,
-      createdBy: userId
+      createdBy: userId,
     });
-    
+
     // Get family ID from the assigned child
-    const childDoc = await getDoc(doc(db, 'users', taskData.assignedTo));
+    // First try to get from children collection (new system)
+    let childDoc = await getDoc(doc(db, 'children', taskData.assignedTo));
     
+    // If not found, try the users collection (old system)
+    if (!childDoc.exists()) {
+      childDoc = await getDoc(doc(db, 'users', taskData.assignedTo));
+    }
+
     if (!childDoc.exists()) {
       throw new Error('Child not found');
     }
-    
+
     const childData = childDoc.data();
     const familyId = childData.familyId;
-    
+
     // Save task to Firestore
     await setDoc(doc(db, 'families', familyId, 'tasks', taskId), newTaskData);
-    
+
     return newTaskData;
   } catch (error) {
     console.error('Error creating task:', error);
@@ -186,45 +192,114 @@ export const deleteTask = async (familyId, taskId) => {
  */
 export const markTaskAsComplete = async (familyId, taskId, childId) => {
   try {
+    console.log(`Marking task ${taskId} as complete for child ${childId} in family ${familyId}`);
+    
     // Get task data
     const taskDoc = await getDoc(doc(db, 'families', familyId, 'tasks', taskId));
     
     if (!taskDoc.exists()) {
+      console.error('Task not found');
       throw new Error('Task not found');
     }
     
     const taskData = taskDoc.data();
+    console.log('Task data retrieved:', taskData);
     
     // Verify that the task is assigned to the child
     if (taskData.assignedTo !== childId) {
+      console.log(`Task is assigned to ${taskData.assignedTo}, not to ${childId}`);
       throw new Error('Task not assigned to this child');
     }
     
-    // Update task status
+    console.log('Updating task status to approved');
+    
+    // Update task status to completed
     await updateDoc(doc(db, 'families', familyId, 'tasks', taskId), {
       status: 'completed',
       completedAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
     
-    // Get parent data to send notification
-    const familyDoc = await getDoc(doc(db, 'families', familyId));
+    console.log('Task status updated successfully');
     
-    if (!familyDoc.exists()) {
-      throw new Error('Family not found');
+    // Add reward to child's reward bank immediately
+    try {
+      console.log('Adding reward to child immediately');
+      await addRewardToChild(childId, taskData.reward);
+      console.log('Reward added successfully');
+    } catch (rewardError) {
+      console.error('Error adding reward to child:', rewardError);
+      console.log('Continuing with task completion despite reward error');
     }
     
-    const familyData = familyDoc.data();
-    const parentId = familyData.mainParentId;
+    // Try to create a notification, but don't let it block task completion if it fails
+    try {
+      // Get child data to include in notification
+      console.log('Getting child data for notification');
+      let childName = "A child";
+      
+      // Get from children collection
+      const childProfileDoc = await getDoc(doc(db, 'children', childId));
+      
+      if (childProfileDoc.exists()) {
+        const childData = childProfileDoc.data();
+        childName = `${childData.firstName} ${childData.lastName}`.trim();
+        console.log(`Child name from profile: ${childName}`);
+      } else {
+        console.log('Child document not found, using default name');
+      }
+      
+      // Get parent data to send notification
+      console.log('Finding parent to notify');
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('familyId', '==', familyId),
+        where('role', '==', 'parent')
+      );
+      
+      const querySnapshot = await getDocs(usersQuery);
+      
+      if (!querySnapshot.empty) {
+        const parentDoc = querySnapshot.docs[0];
+        const parentId = parentDoc.id;
+        console.log(`Found parent ${parentId} to notify`);
+        
+        // Create notification for parent
+        console.log('Creating notification for parent');
+        await createNotification({
+          userId: parentId,
+          title: 'Task Completed',
+          message: `${childName} has completed the task "${taskData.title}" and the reward has been added to their Ribbit Reserve.`,
+          type: 'task_completed',
+          relatedId: taskId
+        });
+        console.log('Notification created successfully');
+      } else {
+        console.log('No parent found to notify');
+      }
+      
+      // Create notification for child
+      await createNotification({
+        userId: childId,
+        title: 'Task Completed',
+        message: `Your task "${taskData.title}" has been completed! Your reward has been added to your Ribbit Reserve.`,
+        type: 'task_approved',
+        relatedId: taskId
+      });
+      
+    } catch (notificationError) {
+      // If notification creation fails, log the error but don't fail the task completion
+      console.error('Error creating notification:', notificationError);
+      console.log('Continuing with task completion despite notification error');
+    }
     
-    // Create notification for parent
-    await createNotification({
-      userId: parentId,
-      title: 'Task Completed',
-      message: `${taskData.title} has been completed and is awaiting your approval.`,
-      type: 'task_completed',
-      relatedId: taskId
-    });
+    // Handle recurring tasks
+    if (taskData.recurrence !== 'none') {
+      await createRecurringTask(taskData, taskData.createdBy);
+    }
+    
+    console.log('Task completion process finished successfully');
+    return taskData;
   } catch (error) {
     console.error('Error marking task as complete:', error);
     throw error;
@@ -291,6 +366,13 @@ export const approveCompletedTask = async (familyId, taskId, parentId) => {
  */
 const addRewardToChild = async (childId, reward) => {
   try {
+    console.log(`Adding reward to child ${childId}:`, reward);
+    
+    if (!reward || !reward.type) {
+      console.error('Invalid reward data:', reward);
+      throw new Error('Invalid reward data');
+    }
+    
     // Get child's reward bank
     const rewardBanksQuery = query(
       collection(db, 'rewardBanks'),
@@ -300,40 +382,122 @@ const addRewardToChild = async (childId, reward) => {
     const querySnapshot = await getDocs(rewardBanksQuery);
     
     if (querySnapshot.empty) {
+      console.error('Reward bank not found for child:', childId);
       throw new Error('Reward bank not found');
     }
     
     const rewardBankDoc = querySnapshot.docs[0];
-    const rewardBankData = rewardBankDoc.data();
+    const rewardBankData = rewardBankDoc.data() || {};
     const rewardBankId = rewardBankDoc.id;
+    
+    console.log('Found reward bank:', rewardBankId);
+    console.log('Current reward bank data:', rewardBankData);
+    
+    // Initialize update object
+    const updateObj = {
+      updatedAt: serverTimestamp()
+    };
     
     // Update reward bank based on reward type
     if (reward.type === 'money') {
-      await updateDoc(doc(db, 'rewardBanks', rewardBankId), {
-        'money.balance': rewardBankData.money.balance + reward.value,
-        updatedAt: serverTimestamp()
-      });
+      // Ensure money object exists and has a balance
+      const money = rewardBankData.money || {};
+      const currentBalance = typeof money.balance === 'number' ? money.balance : 0;
+      const rewardValue = typeof reward.value === 'number' ? reward.value : 0;
+      const newBalance = currentBalance + rewardValue;
+      
+      console.log(`Updating money balance: ${currentBalance} + ${rewardValue} = ${newBalance}`);
+      
+      // Update directly to ensure immediate reflection in the UI
+      updateObj['money.balance'] = newBalance;
+      
+      await updateDoc(doc(db, 'rewardBanks', rewardBankId), updateObj);
+      
+      console.log('Money balance updated successfully');
     } else if (reward.type === 'points') {
-      await updateDoc(doc(db, 'rewardBanks', rewardBankId), {
-        'points.balance': rewardBankData.points.balance + reward.value,
-        updatedAt: serverTimestamp()
-      });
+      // Ensure points object exists and has a balance
+      const points = rewardBankData.points || {};
+      const currentBalance = typeof points.balance === 'number' ? points.balance : 0;
+      const rewardValue = typeof reward.value === 'number' ? reward.value : 0;
+      const newBalance = currentBalance + rewardValue;
+      
+      console.log(`Updating points balance: ${currentBalance} + ${rewardValue} = ${newBalance}`);
+      
+      // Update directly to ensure immediate reflection in the UI
+      updateObj['points.balance'] = newBalance;
+      
+      await updateDoc(doc(db, 'rewardBanks', rewardBankId), updateObj);
+      
+      console.log('Points balance updated successfully');
     } else if (reward.type === 'special') {
       // Create a new special reward
       const specialReward = {
         id: uuidv4(),
         title: reward.title || 'Special Reward',
-        description: reward.description,
+        description: reward.description || '',
         status: 'available',
         createdAt: new Date()
       };
       
+      console.log('Adding special reward:', specialReward);
+      
       // Add to special rewards array
+      const currentSpecialRewards = Array.isArray(rewardBankData.specialRewards) 
+        ? rewardBankData.specialRewards 
+        : [];
+      
+      // We'll no longer check for duplicates by title, as this might be preventing legitimate rewards
+      // Instead, we'll just add the new reward and let the UI handle displaying it
+      console.log('Adding new special reward without duplicate check:', specialReward);
+      
+      // First, clean the existing special rewards array to remove any potential duplicates with the same ID
+      // This ensures we don't have duplicates with the same ID, but allows rewards with the same title
+      const uniqueRewards = [];
+      const seenIds = new Set();
+      
+      for (const reward of currentSpecialRewards) {
+        if (!seenIds.has(reward.id)) {
+          seenIds.add(reward.id);
+          uniqueRewards.push({
+            id: reward.id,
+            title: reward.title,
+            description: reward.description,
+            status: reward.status,
+            createdAt: reward.createdAt
+          });
+        } else {
+          console.log(`Removing duplicate existing reward with ID: ${reward.id}`);
+        }
+      }
+      
+      // Add the new reward to the unique rewards array
+      uniqueRewards.push(specialReward);
+      
+      // Update the reward bank with the unique rewards array
       await updateDoc(doc(db, 'rewardBanks', rewardBankId), {
-        specialRewards: [...rewardBankData.specialRewards, specialReward],
+        specialRewards: uniqueRewards,
         updatedAt: serverTimestamp()
       });
+      
+      console.log('Special reward added successfully');
+      console.log('Updated special rewards:', uniqueRewards);
+      
+      // Force a refresh of the reward bank to ensure the UI is updated
+      try {
+        // Get the updated reward bank
+        const updatedRewardBankDoc = await getDoc(doc(db, 'rewardBanks', rewardBankId));
+        if (updatedRewardBankDoc.exists()) {
+          console.log('Verified special reward was added:', updatedRewardBankDoc.data().specialRewards);
+        }
+      } catch (refreshError) {
+        console.error('Error verifying special reward was added:', refreshError);
+      }
+    } else {
+      console.error('Unknown reward type:', reward.type);
+      throw new Error(`Unknown reward type: ${reward.type}`);
     }
+    
+    console.log('Reward added successfully to child:', childId);
   } catch (error) {
     console.error('Error adding reward to child:', error);
     throw error;
@@ -384,3 +548,6 @@ const createRecurringTask = async (taskData, parentId) => {
     throw error;
   }
 };
+
+// Make sure all functions that need to be exported have export statements
+export { addRewardToChild, createRecurringTask };

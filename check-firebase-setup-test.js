@@ -114,6 +114,49 @@ async function checkFirestore(userCredential) {
   }
 }
 
+// Check Firebase Storage (requires authenticated user)
+async function checkStorage(userCredential) {
+  try {
+    console.log('Checking Firebase Storage...');
+    
+    // Ensure the user is still signed in
+    if (!userCredential.user) {
+      throw new Error('No authenticated user available');
+    }
+    
+    // Create a test file in Storage
+    const testFileRef = ref(storage, `test/test-${Date.now()}.txt`);
+    await uploadString(testFileRef, 'This is a test file');
+    console.log('✅ Firebase Storage is working!');
+    
+    // Delete the test file
+    await deleteObject(testFileRef);
+    console.log('✅ Test file deleted successfully');
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Firebase Storage error:', error.message);
+    if (error.code === 'storage/unauthorized') {
+      console.error('❌ Storage security rules are not set up correctly or authentication failed');
+      console.error('❌ Make sure the user is authenticated before accessing Storage');
+    }
+    return false; // Don't propagate the error to allow the script to continue
+  }
+}
+
+// Check Admin SDK (optional)
+async function checkAdminSDK() {
+  try {
+    console.log('Checking Firebase Admin SDK...');
+    console.log('⚠️ Admin SDK check is optional and not implemented in this test script');
+    console.log('✅ Skipping Admin SDK check');
+    return true;
+  } catch (error) {
+    console.error('❌ Admin SDK error:', error.message);
+    return false; // Don't propagate the error to allow the script to continue
+  }
+}
+
 // Clean up: Delete the test user
 async function cleanup(userCredential) {
   try {
@@ -139,8 +182,8 @@ async function runChecks() {
     // Step 2: Check Firestore with authenticated user
     await checkFirestore(userCredential);
     
-    // Step 3: Check Storage (assuming it also needs auth—modify similarly if needed)
-    await checkStorage();
+    // Step 3: Check Storage with authenticated user
+    await checkStorage(userCredential);
     
     // Step 4: Check Admin SDK (unchanged)
     await checkAdminSDK();

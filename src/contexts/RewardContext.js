@@ -1,12 +1,14 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { useTask } from './TaskContext';
 import {
   getRewardBankByChildId,
   getRewardsByFamilyId,
   updateInterestRate,
   applyInterest,
-  redeemMoneyReward,
-  redeemPointsReward,
+  dispenseMoneyReward,
+  dispensePointsReward,
+  dispenseSpecialReward,
   redeemSpecialReward,
   approveRewardRedemption
 } from '../services/rewardService';
@@ -21,16 +23,18 @@ export const useReward = () => {
 
 // Provider component
 export const RewardProvider = ({ children }) => {
-  const { userData } = useAuth();
+  const { userData, childProfile, authMode } = useAuth();
+  const { refreshRewardsTrigger } = useTask();
   const [rewardBank, setRewardBank] = useState(null);
   const [familyRewards, setFamilyRewards] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Load rewards based on user role
+  // Load rewards based on user role or child profile
   useEffect(() => {
     const loadRewards = async () => {
-      if (!userData) {
+      // Clear rewards if no user data or child profile
+      if (!userData && !childProfile) {
         setRewardBank(null);
         setFamilyRewards([]);
         setLoading(false);
@@ -41,13 +45,13 @@ export const RewardProvider = ({ children }) => {
       setError('');
 
       try {
-        if (userData.role === 'parent') {
+        if (authMode === 'parent' && userData?.role === 'parent') {
           // Load all family rewards for parent
           const rewards = await getRewardsByFamilyId(userData.familyId);
           setFamilyRewards(rewards);
-        } else if (userData.role === 'child') {
-          // Load child's reward bank
-          const childRewardBank = await getRewardBankByChildId(userData.id);
+        } else if (authMode === 'child' && childProfile) {
+          // Load child's reward bank using childProfile
+          const childRewardBank = await getRewardBankByChildId(childProfile.id);
           setRewardBank(childRewardBank);
         }
       } catch (error) {
@@ -58,8 +62,60 @@ export const RewardProvider = ({ children }) => {
       setLoading(false);
     };
 
+    // Load rewards once without auto-refresh to avoid flickering
     loadRewards();
-  }, [userData]);
+    
+    // No auto-refresh cycle - we'll rely on manual refreshes and the refreshRewardsTrigger
+    return () => {};
+  }, [userData, childProfile, authMode]);
+  
+  // Effect to refresh rewards when refreshRewardsTrigger changes
+  useEffect(() => {
+    if (refreshRewardsTrigger > 0 && authMode === 'child' && childProfile) {
+      console.log('Refresh triggered by task completion');
+      
+      const performFullRefresh = async () => {
+        try {
+          console.log('Performing full reward bank refresh');
+          const childRewardBank = await getRewardBankByChildId(childProfile.id);
+          
+          if (childRewardBank) {
+            console.log('Full refresh successful:', childRewardBank);
+            setRewardBank(prevRewardBank => {
+              // Ensure we're not creating duplicate rewards
+              const uniqueSpecialRewards = childRewardBank.specialRewards.reduce((acc, reward) => {
+                const existingRewardIndex = acc.findIndex(r => r.id === reward.id);
+                if (existingRewardIndex === -1) {
+                  acc.push(reward);
+                } else {
+                  // If duplicate exists, keep the most recent or most complete entry
+                  acc[existingRewardIndex] = reward.status !== 'available' 
+                    ? reward 
+                    : acc[existingRewardIndex];
+                }
+                return acc;
+              }, []);
+
+              return {
+                ...childRewardBank,
+                specialRewards: uniqueSpecialRewards
+              };
+            });
+          }
+        } catch (error) {
+          console.error('Error performing full reward refresh:', error);
+        }
+      };
+      
+      // Perform an immediate full refresh with a slight delay to allow database updates
+      const refreshTimer = setTimeout(performFullRefresh, 500);
+      
+      // Clean up the timer if the component unmounts
+      return () => {
+        clearTimeout(refreshTimer);
+      };
+    }
+  }, [refreshRewardsTrigger, childProfile, authMode]);
 
   // Update interest rate for a child
   const setInterestRate = async (childId, interestRate) => {
@@ -72,11 +128,21 @@ export const RewardProvider = ({ children }) => {
       await updateInterestRate(childId, interestRate);
       
       // Update family rewards in state
-      setFamilyRewards(familyRewards.map(reward => 
-        reward.childId === childId 
-          ? { ...reward, money: { ...reward.money, interestRate } } 
-          : reward
-      ));
+      setFamilyRewards(familyRewards.map(reward => {
+        if (reward.childId === childId) {
+          return { 
+            ...reward, 
+            money: { 
+              ...reward.money, 
+              interestRate 
+            } 
+          };
+        }
+        return reward;
+      }));
+      
+      // Refresh rewards to ensure state is updated
+      await refreshRewards();
       
       return true;
     } catch (error) {
@@ -108,73 +174,59 @@ export const RewardProvider = ({ children }) => {
     }
   };
 
-  // Redeem money from reward bank (for children)
-  const redeemMoney = async (amount) => {
-    if (!userData || userData.role !== 'child') {
-      setError('Only children can redeem rewards');
+  // Dispense money from reward bank (for parents)
+  const dispenseMoney = async (childId, amount) => {
+    if (!userData || userData.role !== 'parent') {
+      setError('Only parents can dispense rewards');
       return false;
     }
 
     try {
-      await redeemMoneyReward(userData.id, amount);
+      await dispenseMoneyReward(childId, amount);
       
-      // Update reward bank in state
-      if (rewardBank) {
-        setRewardBank({
-          ...rewardBank,
-          money: {
-            ...rewardBank.money,
-            balance: rewardBank.money.balance - amount
-          }
-        });
-      }
+      // Refresh family rewards
+      const rewards = await getRewardsByFamilyId(userData.familyId);
+      setFamilyRewards(rewards);
       
       return true;
     } catch (error) {
-      console.error('Error redeeming money:', error);
-      setError('Failed to redeem money. Please try again.');
+      console.error('Error dispensing money:', error);
+      setError('Failed to dispense money. Please try again.');
       return false;
     }
   };
 
-  // Redeem points from reward bank (for children)
-  const redeemPoints = async (points) => {
-    if (!userData || userData.role !== 'child') {
-      setError('Only children can redeem rewards');
+  // Dispense points from reward bank (for parents)
+  const dispensePoints = async (childId, points) => {
+    if (!userData || userData.role !== 'parent') {
+      setError('Only parents can dispense rewards');
       return false;
     }
 
     try {
-      await redeemPointsReward(userData.id, points);
+      await dispensePointsReward(childId, points);
       
-      // Update reward bank in state
-      if (rewardBank) {
-        setRewardBank({
-          ...rewardBank,
-          points: {
-            ...rewardBank.points,
-            balance: rewardBank.points.balance - points
-          }
-        });
-      }
+      // Refresh family rewards
+      const rewards = await getRewardsByFamilyId(userData.familyId);
+      setFamilyRewards(rewards);
       
       return true;
     } catch (error) {
-      console.error('Error redeeming points:', error);
-      setError('Failed to redeem points. Please try again.');
+      console.error('Error dispensing points:', error);
+      setError('Failed to dispense points. Please try again.');
       return false;
     }
   };
 
   // Redeem special reward from reward bank (for children)
   const redeemSpecial = async (rewardId) => {
-    if (!userData || userData.role !== 'child') {
+    if (authMode !== 'child' || !childProfile) {
       setError('Only children can redeem rewards');
       return false;
     }
 
     try {
-      await redeemSpecialReward(userData.id, rewardId);
+      await redeemSpecialReward(childProfile.id, rewardId);
       
       // Update reward bank in state
       if (rewardBank) {
@@ -237,7 +289,8 @@ export const RewardProvider = ({ children }) => {
 
   // Refresh rewards
   const refreshRewards = async () => {
-    if (!userData) {
+    // Return if no user data or child profile
+    if (!userData && !childProfile) {
       return;
     }
 
@@ -245,13 +298,13 @@ export const RewardProvider = ({ children }) => {
     setError('');
 
     try {
-      if (userData.role === 'parent') {
+      if (authMode === 'parent' && userData?.role === 'parent') {
         // Refresh all family rewards for parent
         const rewards = await getRewardsByFamilyId(userData.familyId);
         setFamilyRewards(rewards);
-      } else if (userData.role === 'child') {
-        // Refresh child's reward bank
-        const childRewardBank = await getRewardBankByChildId(userData.id);
+      } else if (authMode === 'child' && childProfile) {
+        // Refresh child's reward bank using childProfile
+        const childRewardBank = await getRewardBankByChildId(childProfile.id);
         setRewardBank(childRewardBank);
       }
     } catch (error) {
@@ -270,8 +323,9 @@ export const RewardProvider = ({ children }) => {
     error,
     setInterestRate,
     applyInterestToChild,
-    redeemMoney,
-    redeemPoints,
+    dispenseMoney,
+    dispensePoints,
+    dispenseSpecial: (childId, rewardId) => dispenseSpecialReward(childId, rewardId),
     redeemSpecial,
     approveRedemption,
     refreshRewards

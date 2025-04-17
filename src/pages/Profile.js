@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
+import { useNavigate } from 'react-router-dom';
+import { collection, query, where, getDocs, deleteDoc } from 'firebase/firestore';
+import { db } from '../services/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { getChildrenByFamilyId, addChild, updateChildProfile, removeChild, addParent } from '../services/authService';
 import Loading from '../components/Loading';
@@ -370,7 +373,8 @@ const EmptyState = styled.div`
  * @returns {JSX.Element} - Rendered component
  */
 const Profile = ({ alerts }) => {
-  const { userData, updateUserProfile } = useAuth();
+  const navigate = useNavigate();
+  const { userData, childProfile, updateUser } = useAuth();
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [children, setChildren] = useState([]);
@@ -421,13 +425,21 @@ const Profile = ({ alerts }) => {
             }
           }
         }
+      } else if (childProfile) {
+        // Set profile data from child profile
+        setProfileData({
+          firstName: childProfile.firstName || '',
+          lastName: childProfile.lastName || '',
+          username: childProfile.username || '',
+          profilePicture: childProfile.profilePicture || null
+        });
       }
       
       setLoading(false);
     };
     
     loadData();
-  }, [userData]);
+  }, [userData, childProfile, alerts]);
   
   // Handle profile form input change
   const handleProfileInputChange = (e) => {
@@ -468,13 +480,20 @@ const Profile = ({ alerts }) => {
     setSubmitting(true);
     
     try {
-      // Update user profile
-      await updateUserProfile({
-        id: userData.id, // Include the user ID
+      // Create a clean update object with only the fields we want to update
+      const updateData = {
+        id: userData.id,
         firstName: profileData.firstName,
-        lastName: profileData.lastName,
-        profilePicture: profileData.profilePicture
-      });
+        lastName: profileData.lastName
+      };
+      
+      // Only include profilePicture if it exists and has changed
+      if (profileData.profilePicture && profileData.profilePicture !== userData.profilePicture) {
+        updateData.profilePicture = profileData.profilePicture;
+      }
+      
+      // Update user profile using the updateUser function from AuthContext
+      await updateUser(updateData);
       
       if (alerts) {
         alerts.success('Profile updated successfully');
@@ -655,8 +674,22 @@ const Profile = ({ alerts }) => {
         await addParent(parentData);
         
         if (alerts) {
-          alerts.success('Parent added successfully');
+          alerts.success('Parent added successfully. The new parent can log in with their email and password.');
         }
+        
+        // Store the current user's email to help them log back in
+        const currentUserEmail = userData.email;
+        
+        // Redirect to login page with a message
+        navigate('/login', { 
+          state: { 
+            message: 'Please log back in with your email and password.',
+            email: currentUserEmail
+          } 
+        });
+        
+        // Return early since we're redirecting
+        return;
       }
       
       // Refresh children list
@@ -680,7 +713,28 @@ const Profile = ({ alerts }) => {
   const handleDeleteChild = async (childId) => {
     if (window.confirm('Are you sure you want to remove this child? This action cannot be undone.')) {
       try {
-        // Just pass the childId, not the familyId
+        // First find and delete tasks assigned to this child
+        try {
+          const tasksQuery = query(
+            collection(db, 'families', userData.familyId, 'tasks'),
+            where('assignedTo', '==', childId)
+          );
+          
+          const tasksSnapshot = await getDocs(tasksQuery);
+          
+          // Delete each task
+          const taskDeletions = tasksSnapshot.docs.map(doc => 
+            deleteDoc(doc.ref)
+          );
+          
+          await Promise.all(taskDeletions);
+          console.log(`Deleted ${taskDeletions.length} tasks for child ${childId}`);
+        } catch (taskError) {
+          console.error('Error deleting child tasks:', taskError);
+          // Continue with child deletion even if task deletion fails
+        }
+        
+        // Now delete the child
         await removeChild(childId);
         
         // Refresh children list
@@ -715,7 +769,7 @@ const Profile = ({ alerts }) => {
       <HeaderSection>
         <ToadMascot size={100} message="Manage your profile!" />
         <HeaderText>
-          <Heading>Profile Settings</Heading>
+          <Heading>Family Settings</Heading>
           <Subheading>Update your profile and manage your family</Subheading>
         </HeaderText>
       </HeaderSection>
@@ -942,7 +996,11 @@ const Profile = ({ alerts }) => {
               <FormRow>
                 <FormGroup>
                   <label htmlFor="password">
-                    {modalMode === 'editChild' ? 'New Password (leave blank to keep current)' : 'Password'}
+                    {modalMode === 'editChild' 
+                      ? 'New PIN/Password (leave blank to keep current)' 
+                      : modalMode === 'addChild'
+                        ? 'PIN/Password (used for child login)'
+                        : 'Password'}
                   </label>
                   <input
                     id="password"
@@ -950,20 +1008,25 @@ const Profile = ({ alerts }) => {
                     type="password"
                     value={familyMemberData.password}
                     onChange={handleFamilyMemberInputChange}
-                    placeholder="Enter password"
+                    placeholder={modalMode === 'addChild' ? "Enter 4-digit PIN for child login" : "Enter password"}
                     required={modalMode !== 'editChild'}
                   />
+                  {modalMode === 'addChild' && (
+                    <small style={{ color: 'var(--text-color-light)', marginTop: '0.25rem', display: 'block' }}>
+                      This PIN will be used for your child to log in
+                    </small>
+                  )}
                 </FormGroup>
                 
                 <FormGroup>
-                  <label htmlFor="confirmPassword">Confirm Password</label>
+                  <label htmlFor="confirmPassword">Confirm {modalMode === 'addChild' ? 'PIN/Password' : 'Password'}</label>
                   <input
                     id="confirmPassword"
                     name="confirmPassword"
                     type="password"
                     value={familyMemberData.confirmPassword}
                     onChange={handleFamilyMemberInputChange}
-                    placeholder="Confirm password"
+                    placeholder={modalMode === 'addChild' ? "Confirm PIN" : "Confirm password"}
                     required={modalMode !== 'editChild' || familyMemberData.password !== ''}
                   />
                 </FormGroup>

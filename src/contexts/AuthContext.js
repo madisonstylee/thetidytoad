@@ -1,7 +1,13 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth } from '../services/firebase';
-import { getUserData } from '../services/authService';
+import { getUserData, updateUserProfile } from '../services/authService';
+import { 
+  getCurrentSession, 
+  getCurrentChildProfile, 
+  clearSession, 
+  isChildMode 
+} from '../services/sessionService';
 
 // Create the context
 const AuthContext = createContext();
@@ -15,95 +21,137 @@ export const useAuth = () => {
 export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [userData, setUserData] = useState(null);
+  const [childProfile, setChildProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [authMode, setAuthMode] = useState('parent'); // 'parent' or 'child'
 
-  // Listen for auth state changes
+  // Check for existing child session on mount
   useEffect(() => {
+    const checkChildSession = () => {
+      if (isChildMode()) {
+        const session = getCurrentSession();
+        const profile = getCurrentChildProfile();
+        
+        if (session && profile) {
+          console.log('Child session found:', profile.firstName);
+          setChildProfile(profile);
+          setAuthMode('child');
+          setLoading(false);
+          return true;
+        }
+      }
+      return false;
+    };
+    
+    // If there's a valid child session, don't proceed with parent auth
+    if (!checkChildSession()) {
+      // Continue with normal parent authentication
+      setAuthMode('parent');
+    }
+  }, []);
+
+  // Listen for parent auth state changes
+  useEffect(() => {
+    // Skip if in child mode
+    if (authMode === 'child') {
+      return () => {};
+    }
+    
+    // Set loading state immediately
+    setLoading(true);
+    
+    // Set a safety timeout to ensure loading state is set to false
+    // even if there are issues with authentication
+    const safetyTimeout = setTimeout(() => {
+      console.log('Safety timeout triggered - forcing loading to false');
+      setLoading(false);
+    }, 5000); // 5 seconds timeout
+    
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       console.log('Auth state changed:', user ? `User: ${user.email}` : 'No user');
       setCurrentUser(user);
-      setLoading(true);
       
-      if (user) {
-        try {
-          // Add a small delay to ensure Firestore document is created
-          // This helps with the race condition after registration
-          setTimeout(async () => {
-            try {
-              // Get additional user data from Firestore
-              const data = await getUserData(user.uid);
-              console.log('User data loaded:', data);
-              setUserData(data);
-              setLoading(false);
-            } catch (error) {
-              console.error('Error getting user data:', error);
-              setError('Failed to load user data. Please try again later.');
-              setLoading(false);
-            }
-          }, 1000);
-        } catch (error) {
-          console.error('Error in auth state change handler:', error);
-          setError('Failed to load user data. Please try again later.');
-          setLoading(false);
+      try {
+        if (user) {
+          try {
+            // Get additional user data from Firestore immediately without delay
+            const data = await getUserData(user.uid);
+            console.log('User data loaded:', data);
+            setUserData(data);
+          } catch (error) {
+            console.error('Error getting user data:', error);
+            setError('Failed to load user data. Please try again later.');
+            // Still set userData to null if there's an error
+            setUserData(null);
+          }
+        } else {
+          setUserData(null);
         }
-      } else {
+      } catch (error) {
+        console.error('Unexpected error in auth state change:', error);
+        // Ensure userData is set to null in case of any error
         setUserData(null);
+      } finally {
+        // Always set loading to false, even if there's an error
+        clearTimeout(safetyTimeout);
         setLoading(false);
       }
+    }, (error) => {
+      // Handle any errors in the onAuthStateChanged observer
+      console.error('Auth state observer error:', error);
+      setError('Authentication error. Please try again later.');
+      setCurrentUser(null);
+      setUserData(null);
+      clearTimeout(safetyTimeout);
+      setLoading(false);
     });
 
-    return unsubscribe;
-  }, []);
+    return () => {
+      clearTimeout(safetyTimeout);
+      unsubscribe();
+    };
+  }, [authMode]);
 
-  // Child login (doesn't use Firebase Auth)
-  const childLogin = async (childData) => {
-    console.log('Child login called with data:', childData);
-    
-    // Validate child data
-    if (!childData || !childData.id || !childData.role || childData.role !== 'child') {
-      console.error('Invalid child data:', childData);
-      throw new Error('Invalid child data');
+  const updateUser = async (data) => {
+    try {
+      const updatedData = await updateUserProfile(data);
+      setUserData(prevData => ({ ...prevData, ...updatedData }));
+      return updatedData;
+    } catch (error) {
+      console.error('Error updating user:', error);
+      throw error;
     }
-    
-    setCurrentUser(null); // No Firebase Auth user for children
-    setUserData(childData);
-    
-    // Set loading to false to ensure UI updates
-    setLoading(false);
-    
-    console.log('Child login successful, userData set to:', childData);
-    return childData;
   };
 
-  // Child logout
-  const childLogout = () => {
+  // Set child profile and mode
+  const setChildMode = (profile) => {
+    setChildProfile(profile);
+    setAuthMode('child');
     setCurrentUser(null);
     setUserData(null);
   };
-
-  // Update user data in context
-  const updateUser = (data) => {
-    // Merge the new data with the existing userData
-    setUserData(prevData => ({
-      ...prevData,
-      ...data,
-      updatedAt: new Date()
-    }));
+  
+  // Clear child session and switch to parent mode
+  const clearChildMode = () => {
+    clearSession();
+    setChildProfile(null);
+    setAuthMode('parent');
   };
 
-  // Value to be provided by the context
   const value = {
     currentUser,
     userData,
+    childProfile,
     loading,
     error,
-    childLogin,
-    childLogout,
     updateUser,
-    isParent: userData?.role === 'parent',
-    isChild: userData?.role === 'child',
-    isLoggedIn: !!userData
+    setChildMode,
+    clearChildMode,
+    isParent: authMode === 'parent' && userData?.role === 'parent',
+    isChild: authMode === 'child',
+    isLoggedIn: (authMode === 'parent' && !!userData) || (authMode === 'child' && !!childProfile),
+    authMode
   };
 
   return (

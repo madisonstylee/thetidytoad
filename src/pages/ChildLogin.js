@@ -1,11 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
-import { signInChild } from '../services/authService';
 import { useAuth } from '../contexts/AuthContext';
 import ToadMascot from '../components/ToadMascot';
+import { 
+  findChildProfile, 
+  verifyChildPin, 
+  createChildSession 
+} from '../services/sessionService';
+import { 
+  collection, 
+  query, 
+  where, 
+  getDocs 
+} from 'firebase/firestore';
+import { db } from '../services/firebase';
 
-// Styled container for the login page
+// Styled components
 const LoginContainer = styled.div`
   display: flex;
   flex-direction: column;
@@ -16,7 +27,6 @@ const LoginContainer = styled.div`
   margin: 0 auto;
 `;
 
-// Styled form
 const LoginForm = styled.form`
   width: 100%;
   background-color: var(--background-light);
@@ -25,7 +35,6 @@ const LoginForm = styled.form`
   box-shadow: var(--box-shadow-md);
 `;
 
-// Styled heading
 const Heading = styled.h1`
   font-family: var(--font-family-fun);
   color: var(--accent-color);
@@ -33,12 +42,67 @@ const Heading = styled.h1`
   margin-bottom: 1.5rem;
 `;
 
-// Styled form group
 const FormGroup = styled.div`
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
 `;
 
-// Styled error message
+const Label = styled.label`
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 600;
+  color: var(--text-color);
+`;
+
+const Input = styled.input`
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid var(--background-dark);
+  border-radius: var(--border-radius-md);
+  font-size: 1rem;
+  transition: border-color 0.2s;
+  
+  &:focus {
+    border-color: var(--primary-color);
+    outline: none;
+  }
+`;
+
+const Select = styled.select`
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid var(--background-dark);
+  border-radius: var(--border-radius-md);
+  font-size: 1rem;
+  transition: border-color 0.2s;
+  
+  &:focus {
+    border-color: var(--primary-color);
+    outline: none;
+  }
+`;
+
+const PinContainer = styled.div`
+  display: flex;
+  justify-content: space-between;
+  margin-top: 1rem;
+`;
+
+const PinDigit = styled.input`
+  width: 3rem;
+  height: 3.5rem;
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: bold;
+  border: 2px solid var(--background-dark);
+  border-radius: var(--border-radius-md);
+  margin: 0 0.25rem;
+  
+  &:focus {
+    border-color: var(--primary-color);
+    outline: none;
+  }
+`;
+
 const ErrorMessage = styled.div`
   color: var(--error-color);
   background-color: rgba(244, 67, 54, 0.1);
@@ -48,16 +112,8 @@ const ErrorMessage = styled.div`
   font-size: 0.9rem;
 `;
 
-// Styled button container
-const ButtonContainer = styled.div`
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 2rem;
-`;
-
-// Styled submit button
 const SubmitButton = styled.button`
+  width: 100%;
   background-color: var(--accent-color);
   color: white;
   border: none;
@@ -66,6 +122,7 @@ const SubmitButton = styled.button`
   font-weight: 600;
   cursor: pointer;
   transition: background-color 0.2s;
+  margin-top: 1rem;
   
   &:hover {
     background-color: var(--accent-color-dark);
@@ -77,22 +134,10 @@ const SubmitButton = styled.button`
   }
 `;
 
-// Styled link
-const StyledLink = styled(Link)`
-  color: var(--primary-color);
-  text-decoration: none;
-  font-weight: 500;
-  
-  &:hover {
-    text-decoration: underline;
-  }
-`;
-
-// Styled divider
 const Divider = styled.div`
   display: flex;
   align-items: center;
-  margin: 1rem 0;
+  margin: 1.5rem 0;
   
   &::before, &::after {
     content: '';
@@ -107,7 +152,6 @@ const Divider = styled.div`
   }
 `;
 
-// Styled parent login button
 const ParentLoginButton = styled(Link)`
   display: block;
   width: 100%;
@@ -128,7 +172,6 @@ const ParentLoginButton = styled(Link)`
   }
 `;
 
-// Styled help text
 const HelpText = styled.p`
   text-align: center;
   margin-top: 1rem;
@@ -136,71 +179,202 @@ const HelpText = styled.p`
   color: var(--text-color-light);
 `;
 
+const StepIndicator = styled.div`
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+`;
+
+const Step = styled.div`
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: ${props => props.active ? 'var(--accent-color)' : 'var(--background-dark)'};
+  margin: 0 5px;
+`;
+
 /**
- * ChildLogin component for child login
+ * ChildLogin component for PIN-based child login
  * @returns {JSX.Element} - Rendered component
  */
 const ChildLogin = ({ alerts }) => {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [step, setStep] = useState(1); // 1: Family Email, 2: Child Selection, 3: PIN
+  const [familyEmail, setFamilyEmail] = useState('');
+  const [selectedChild, setSelectedChild] = useState('');
+  const [pin, setPin] = useState(['', '', '', '']);
+  const [availableChildren, setAvailableChildren] = useState([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [childProfile, setChildProfile] = useState(null);
   
   const navigate = useNavigate();
-  const { childLogin } = useAuth();
+  const { setChildMode, isLoggedIn, authMode } = useAuth();
   
-  // Handle form submission
-  const handleSubmit = async (e) => {
+  // Refs for PIN inputs
+  const pinRefs = [
+    React.useRef(null),
+    React.useRef(null),
+    React.useRef(null),
+    React.useRef(null)
+  ];
+  
+  // Redirect if already logged in
+  useEffect(() => {
+    if (isLoggedIn) {
+      if (authMode === 'child') {
+        navigate('/child-dashboard');
+      } else {
+        navigate('/parent-dashboard');
+      }
+    }
+  }, [isLoggedIn, authMode, navigate]);
+  
+  // Handle family email submission
+  const handleFamilyEmailSubmit = async (e) => {
     e.preventDefault();
     
-    // Validate form
-    if (!username || !password) {
-      setError('Please enter both username and password');
+    if (!familyEmail) {
+      setError('Please enter your family email');
       return;
     }
     
+    setLoading(true);
+    setError('');
+    
     try {
-      setError('');
-      setLoading(true);
+      // Find parent by email
+      const usersQuery = query(
+        collection(db, 'users'),
+        where('email', '==', familyEmail),
+        where('role', '==', 'parent')
+      );
       
-      console.log(`Attempting to sign in child with username: ${username}`);
+      const querySnapshot = await getDocs(usersQuery);
       
-      // Sign in child
-      const childData = await signInChild(username, password);
-      
-      console.log('Child data received:', childData);
-      
-      if (!childData) {
-        throw new Error('No child data returned from sign in');
+      if (querySnapshot.empty) {
+        setError('No family found with this email. Please check the email or ask your parent for the correct email.');
+        setLoading(false);
+        return;
       }
       
-      // Update auth context
-      await childLogin(childData);
+      const parentDoc = querySnapshot.docs[0];
+      const parentData = parentDoc.data();
+      const familyId = parentData.familyId;
       
-      console.log('Child login successful, navigating to dashboard');
+      // Find children for this family
+      const childrenQuery = query(
+        collection(db, 'children'),
+        where('familyId', '==', familyId)
+      );
       
-      // Show success alert if available
-      if (alerts) {
-        alerts.success('Successfully logged in!');
+      const childrenSnapshot = await getDocs(childrenQuery);
+      
+      if (childrenSnapshot.empty) {
+        setError('No children found for this family. Please ask your parent to add you.');
+        setLoading(false);
+        return;
       }
       
-      // Navigate to child dashboard
-      navigate('/child-dashboard');
+      const childProfiles = childrenSnapshot.docs.map(doc => doc.data());
+      setAvailableChildren(childProfiles);
+      setStep(2);
     } catch (error) {
-      console.error('Child login error:', error);
+      console.error('Error finding family:', error);
+      setError('Could not find your family. Please check the email and try again.');
+    }
+    
+    setLoading(false);
+  };
+  
+  // Handle child selection
+  const handleChildSelect = (e) => {
+    const childId = e.target.value;
+    setSelectedChild(childId);
+    
+    if (childId) {
+      const profile = availableChildren.find(child => child.id === childId);
+      setChildProfile(profile);
+      setStep(3);
       
-      // Provide more specific error messages
-      if (error.message === 'Child not found') {
-        setError(`No child account found with username "${username}". Please check the username and try again.`);
-      } else if (error.message === 'Invalid password') {
-        setError('Incorrect password. Please try again.');
-      } else if (error.message === 'Invalid child data') {
-        setError('There was a problem with your account data. Please contact a parent for help.');
+      // Focus the first PIN input
+      setTimeout(() => {
+        if (pinRefs[0].current) {
+          pinRefs[0].current.focus();
+        }
+      }, 100);
+    }
+  };
+  
+  // Handle PIN input
+  const handlePinChange = (index, value) => {
+    if (value.length > 1) {
+      value = value.charAt(0);
+    }
+    
+    const newPin = [...pin];
+    newPin[index] = value;
+    setPin(newPin);
+    
+    // Auto-focus next input
+    if (value && index < 3) {
+      pinRefs[index + 1].current.focus();
+    }
+  };
+  
+  // Handle PIN submission
+  const handlePinSubmit = async (e) => {
+    e.preventDefault();
+    
+    const fullPin = pin.join('');
+    
+    if (fullPin.length !== 4) {
+      setError('Please enter your 4-digit PIN');
+      return;
+    }
+    
+    setLoading(true);
+    setError('');
+    
+    try {
+      // Verify PIN against Firestore
+      if (childProfile.pin === fullPin) {
+        // Create child session
+        const session = createChildSession(childProfile);
+        setChildMode(childProfile);
+        
+        // Show success alert if available
+        if (alerts) {
+          alerts.success(`Welcome, ${childProfile.firstName}!`);
+        }
+        
+        // Navigate to child dashboard
+        navigate('/child-dashboard');
       } else {
-        setError('Failed to log in. Please check your username and password and try again.');
+        setError('Incorrect PIN. Please try again.');
+        setPin(['', '', '', '']);
+        
+        // Focus the first PIN input
+        if (pinRefs[0].current) {
+          pinRefs[0].current.focus();
+        }
       }
-      
-      setLoading(false);
+    } catch (error) {
+      console.error('Error verifying PIN:', error);
+      setError('Could not verify your PIN. Please try again.');
+    }
+    
+    setLoading(false);
+  };
+  
+  // Handle back button
+  const handleBack = () => {
+    if (step === 2) {
+      setStep(1);
+      setSelectedChild('');
+      setChildProfile(null);
+    } else if (step === 3) {
+      setStep(2);
+      setPin(['', '', '', '']);
     }
   };
   
@@ -210,47 +384,91 @@ const ChildLogin = ({ alerts }) => {
         size={120} 
         message="Hi there, friend!" 
         animate="jump"
+        showRibbit={false}
       />
       
-      <LoginForm onSubmit={handleSubmit}>
+      <LoginForm onSubmit={step === 1 ? handleFamilyEmailSubmit : step === 3 ? handlePinSubmit : null}>
         <Heading>Kid Login</Heading>
+        
+        <StepIndicator>
+          <Step active={step >= 1} />
+          <Step active={step >= 2} />
+          <Step active={step >= 3} />
+        </StepIndicator>
         
         {error && <ErrorMessage>{error}</ErrorMessage>}
         
-        <FormGroup>
-          <label htmlFor="username">Username</label>
-          <input
-            id="username"
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="Enter your username"
-            required
-          />
-        </FormGroup>
+        {step === 1 && (
+          <FormGroup>
+            <Label htmlFor="familyEmail">Parent's Email</Label>
+            <Input
+              id="familyEmail"
+              type="email"
+              value={familyEmail}
+              onChange={(e) => setFamilyEmail(e.target.value)}
+              placeholder="Enter your parent's email address"
+              required
+            />
+            <HelpText>This is the email your parent used to create their account</HelpText>
+            
+            <SubmitButton type="submit" disabled={loading}>
+              {loading ? 'Checking...' : 'Next'}
+            </SubmitButton>
+          </FormGroup>
+        )}
         
-        <FormGroup>
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="Enter your password"
-            required
-          />
-        </FormGroup>
+        {step === 2 && (
+          <FormGroup>
+            <Label htmlFor="childSelect">Who are you?</Label>
+            <Select
+              id="childSelect"
+              value={selectedChild}
+              onChange={handleChildSelect}
+              required
+            >
+              <option value="">Select your name</option>
+              {availableChildren.map(child => (
+                <option key={child.id} value={child.id}>
+                  {child.firstName}
+                </option>
+              ))}
+            </Select>
+            
+            <SubmitButton type="button" onClick={handleBack}>
+              Back
+            </SubmitButton>
+          </FormGroup>
+        )}
         
-        <ButtonContainer>
-          <div></div> {/* Empty div for spacing */}
-          <SubmitButton type="submit" disabled={loading}>
-            {loading ? 'Logging in...' : 'Login'}
-          </SubmitButton>
-        </ButtonContainer>
-        
-        <HelpText>
-          Ask your parent for your username and password
-        </HelpText>
+        {step === 3 && (
+          <FormGroup>
+            <Label>Enter your PIN</Label>
+            <PinContainer>
+              {pin.map((digit, index) => (
+                <PinDigit
+                  key={index}
+                  type="text"
+                  maxLength="1"
+                  value={digit}
+                  onChange={(e) => handlePinChange(index, e.target.value)}
+                  ref={pinRefs[index]}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  required
+                />
+              ))}
+            </PinContainer>
+            <HelpText>Ask your parent for your PIN</HelpText>
+            
+            <SubmitButton type="submit" disabled={loading}>
+              {loading ? 'Logging in...' : 'Login'}
+            </SubmitButton>
+            
+            <SubmitButton type="button" onClick={handleBack} style={{ backgroundColor: 'var(--background-dark)' }}>
+              Back
+            </SubmitButton>
+          </FormGroup>
+        )}
       </LoginForm>
       
       <Divider>

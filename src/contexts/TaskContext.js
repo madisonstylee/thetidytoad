@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { getCurrentChildProfile } from '../services/sessionService';
 import {
   getTasksByFamilyId,
   getTasksByChildId,
@@ -22,17 +23,19 @@ export const useTask = () => {
 
 // Provider component
 export const TaskProvider = ({ children }) => {
-  const { userData } = useAuth();
+  const { userData, childProfile, authMode } = useAuth();
   const [tasks, setTasks] = useState([]);
   const [pendingTasks, setPendingTasks] = useState([]);
   const [tasksAwaitingApproval, setTasksAwaitingApproval] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [refreshRewardsTrigger, setRefreshRewardsTrigger] = useState(0);
 
-  // Load tasks based on user role
+  // Load tasks based on user role or child profile
   useEffect(() => {
     const loadTasks = async () => {
-      if (!userData) {
+      // Clear tasks if no user data or child profile
+      if (!userData && !childProfile) {
         setTasks([]);
         setPendingTasks([]);
         setTasksAwaitingApproval([]);
@@ -44,33 +47,33 @@ export const TaskProvider = ({ children }) => {
       setError('');
 
       try {
-        if (userData.role === 'parent') {
-          // Load all family tasks for parent
+        if (authMode === 'parent' && userData?.role === 'parent') {
+          // Parent mode - refresh all family tasks
           const familyTasks = await getTasksByFamilyId(userData.familyId);
           setTasks(familyTasks);
 
-          // Load tasks awaiting approval
+          // Refresh tasks awaiting approval
           const awaitingApproval = await getTasksAwaitingApproval(userData.familyId);
           setTasksAwaitingApproval(awaitingApproval);
-        } else if (userData.role === 'child') {
-          // Load child's tasks
-          const childTasks = await getTasksByChildId(userData.familyId, userData.id);
+        } else if (authMode === 'child' && childProfile) {
+          // Child mode - refresh child's tasks using profile
+          const childTasks = await getTasksByChildId(childProfile.familyId, childProfile.id);
           setTasks(childTasks);
 
-          // Load pending tasks
-          const childPendingTasks = await getPendingTasksByChildId(userData.familyId, userData.id);
+          // Refresh pending tasks
+          const childPendingTasks = await getPendingTasksByChildId(childProfile.familyId, childProfile.id);
           setPendingTasks(childPendingTasks);
         }
       } catch (error) {
-        console.error('Error loading tasks:', error);
-        setError('Failed to load tasks. Please try again later.');
+        console.error('Error refreshing tasks:', error);
+        setError('Failed to refresh tasks. Please try again later.');
       }
 
       setLoading(false);
     };
 
     loadTasks();
-  }, [userData]);
+  }, [userData, childProfile, authMode]);
 
   // Create a new task
   const createTask = async (taskData) => {
@@ -136,23 +139,64 @@ export const TaskProvider = ({ children }) => {
   };
 
   // Mark a task as complete (for children)
-  const completeTask = async (familyId, taskId) => {
-    if (!userData || userData.role !== 'child') {
+  const completeTask = async (familyId, taskId, userId) => {
+    if (authMode !== 'child' || !childProfile) {
       setError('Only children can complete tasks');
       return false;
     }
 
     try {
-      await markTaskAsComplete(familyId, taskId, userData.id);
+      // Get the task details to determine the reward
+      const taskToComplete = tasks.find(task => task.id === taskId);
       
-      // Update task status in state
-      setTasks(tasks.map(task => 
-        task.id === taskId ? { ...task, status: 'completed', completedAt: new Date() } : task
-      ));
+      if (!taskToComplete) {
+        throw new Error('Task not found');
+      }
       
+      console.log('Marking task as complete:', taskToComplete);
+      
+      // First, update the UI immediately to show the task as completed
+      // This ensures the UI updates even if there's a backend error
+      setTasks(
+        tasks.map(task =>
+          task.id === taskId ? { ...task, status: 'completed', completedAt: new Date() } : task
+        )
+      );
+
       // Remove from pending tasks
       setPendingTasks(pendingTasks.filter(task => task.id !== taskId));
       
+      try {
+        // Try to mark the task as complete in the backend
+        await markTaskAsComplete(familyId, taskId, userId);
+        console.log('Task marked as complete in backend');
+        
+        // Trigger a refresh of the reward bank by incrementing the trigger value
+        // This will be picked up by the RewardContext to refresh the rewards
+        setRefreshRewardsTrigger(prev => prev + 1);
+        console.log('Triggered reward refresh after task completion');
+        
+        // The task is now marked as completed and the reward is added
+        // We'll automatically approve it as per the new requirements
+        try {
+          await approveCompletedTask(familyId, taskId, userId);
+          console.log('Task automatically approved');
+        } catch (approveError) {
+          console.error('Error automatically approving task:', approveError);
+          console.log('Task is still marked as completed and reward is added');
+        }
+        
+        // Force a second refresh after a short delay to ensure the UI is updated
+        setTimeout(() => {
+          setRefreshRewardsTrigger(prev => prev + 1);
+          console.log('Triggered second reward refresh after delay');
+        }, 1000);
+      } catch (error) {
+        // Log the error but continue with UI updates
+        console.error('Error marking task as complete in backend:', error);
+        setError('Task marked as complete, but there was an issue with notifications.');
+      }
+
       return true;
     } catch (error) {
       console.error('Error completing task:', error);
@@ -189,7 +233,7 @@ export const TaskProvider = ({ children }) => {
 
   // Refresh tasks
   const refreshTasks = async () => {
-    if (!userData) {
+    if (!userData && !childProfile) {
       return;
     }
 
@@ -197,7 +241,7 @@ export const TaskProvider = ({ children }) => {
     setError('');
 
     try {
-      if (userData.role === 'parent') {
+      if (authMode === 'parent' && userData?.role === 'parent') {
         // Refresh all family tasks for parent
         const familyTasks = await getTasksByFamilyId(userData.familyId);
         setTasks(familyTasks);
@@ -205,13 +249,13 @@ export const TaskProvider = ({ children }) => {
         // Refresh tasks awaiting approval
         const awaitingApproval = await getTasksAwaitingApproval(userData.familyId);
         setTasksAwaitingApproval(awaitingApproval);
-      } else if (userData.role === 'child') {
+      } else if (authMode === 'child' && childProfile) {
         // Refresh child's tasks
-        const childTasks = await getTasksByChildId(userData.familyId, userData.id);
+        const childTasks = await getTasksByChildId(childProfile.familyId, childProfile.id);
         setTasks(childTasks);
 
         // Refresh pending tasks
-        const childPendingTasks = await getPendingTasksByChildId(userData.familyId, userData.id);
+        const childPendingTasks = await getPendingTasksByChildId(childProfile.familyId, childProfile.id);
         setPendingTasks(childPendingTasks);
       }
     } catch (error) {
@@ -234,7 +278,8 @@ export const TaskProvider = ({ children }) => {
     removeTask,
     completeTask,
     approveTask,
-    refreshTasks
+    refreshTasks,
+    refreshRewardsTrigger
   };
 
   return (

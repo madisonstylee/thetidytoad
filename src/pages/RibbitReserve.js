@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { useAuth } from '../contexts/AuthContext';
 import { useReward } from '../contexts/RewardContext';
@@ -266,345 +266,298 @@ const TransactionAmount = styled.div`
  */
 const RibbitReserve = ({ alerts }) => {
   const { userData } = useAuth();
-  const { rewardBank, redeemMoney, redeemPoints, redeemSpecial, loading } = useReward();
+  const { rewardBank, loading, refreshRewards } = useReward();
   const [activeTab, setActiveTab] = useState('money');
-  const [redeemAmount, setRedeemAmount] = useState('');
-  const [redeemingRewardId, setRedeemingRewardId] = useState(null);
-  const [redeeming, setRedeeming] = useState(false);
+  const [error, setError] = useState(null);
   
   // Handle tab change
   const handleTabChange = (tab) => {
     setActiveTab(tab);
   };
   
-  // Handle money redemption
-  const handleRedeemMoney = async (e) => {
-    e.preventDefault();
-    
-    // Validate amount
-    const amount = parseFloat(redeemAmount);
-    if (isNaN(amount) || amount <= 0) {
-      if (alerts) {
-        alerts.error('Please enter a valid amount');
-      }
-      return;
-    }
-    
-    // Check if amount is greater than balance
-    if (amount > rewardBank?.money?.balance) {
-      if (alerts) {
-        alerts.error('You cannot redeem more than your balance');
-      }
-      return;
-    }
-    
-    setRedeeming(true);
-    
-    try {
-      const success = await redeemMoney(amount);
-      
-      if (success) {
-        setRedeemAmount('');
-        
-        if (alerts) {
-          alerts.success('Redemption request sent to your parent');
-        }
-      }
-    } catch (error) {
-      console.error('Error redeeming money:', error);
-      
-      if (alerts) {
-        alerts.error('Failed to redeem money. Please try again.');
-      }
-    }
-    
-    setRedeeming(false);
-  };
+  // No redemption functions needed as per new requirements
   
-  // Handle points redemption
-  const handleRedeemPoints = async (e) => {
-    e.preventDefault();
-    
-    // Validate amount
-    const points = parseInt(redeemAmount);
-    if (isNaN(points) || points <= 0) {
-      if (alerts) {
-        alerts.error('Please enter a valid number of points');
-      }
-      return;
-    }
-    
-    // Check if points is greater than balance
-    if (points > rewardBank?.points?.balance) {
-      if (alerts) {
-        alerts.error('You cannot redeem more than your balance');
-      }
-      return;
-    }
-    
-    setRedeeming(true);
-    
-    try {
-      const success = await redeemPoints(points);
-      
-      if (success) {
-        setRedeemAmount('');
-        
-        if (alerts) {
-          alerts.success('Redemption request sent to your parent');
-        }
-      }
-    } catch (error) {
-      console.error('Error redeeming points:', error);
-      
-      if (alerts) {
-        alerts.error('Failed to redeem points. Please try again.');
-      }
-    }
-    
-    setRedeeming(false);
-  };
+  // No forced refresh on component mount - we'll rely on the initial load from RewardContext
   
-  // Handle special reward redemption
-  const handleRedeemSpecial = async (rewardId) => {
-    setRedeemingRewardId(rewardId);
-    
-    try {
-      const success = await redeemSpecial(rewardId);
-      
-      if (success && alerts) {
-        alerts.success('Redemption request sent to your parent');
-      }
-    } catch (error) {
-      console.error('Error redeeming special reward:', error);
-      
-      if (alerts) {
-        alerts.error('Failed to redeem reward. Please try again.');
-      }
-    }
-    
-    setRedeemingRewardId(null);
-  };
+  // Error boundary effect
+  useEffect(() => {
+    // Reset error state when component mounts or rewardBank changes
+    setError(null);
+  }, [rewardBank]);
   
   // Show loading indicator while data is loading
   if (loading) {
     return <Loading message="Loading Ribbit Reserve..." />;
   }
   
-  // Mock data for demonstration (replace with actual data from rewardBank)
-  const moneyBalance = rewardBank?.money?.balance || 0;
-  const interestRate = rewardBank?.money?.interestRate || 0;
-  const pointsBalance = rewardBank?.points?.balance || 0;
-  const specialRewards = rewardBank?.specialRewards || [];
+  // Show error UI if there's an error
+  if (error) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center' }}>
+        <h2>Something went wrong</h2>
+        <p>We're having trouble loading your rewards. Please try refreshing the page.</p>
+        <pre style={{ textAlign: 'left', margin: '1rem auto', maxWidth: '80%', overflow: 'auto' }}>
+          {error.toString()}
+        </pre>
+        <button 
+          onClick={() => window.location.reload()} 
+          style={{ 
+            padding: '0.75rem 1.5rem', 
+            backgroundColor: 'var(--primary-color)', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '0.5rem', 
+            cursor: 'pointer',
+            marginTop: '1rem'
+          }}
+        >
+          Refresh Page
+        </button>
+      </div>
+    );
+  }
   
-  // Filter special rewards by status
-  const availableSpecialRewards = specialRewards.filter(reward => reward.status === 'available');
-  const pendingSpecialRewards = specialRewards.filter(reward => reward.status === 'pending_redemption');
-  const redeemedSpecialRewards = specialRewards.filter(reward => reward.status === 'redeemed');
-  
-  return (
-    <ReserveContainer>
-      <HeaderSection>
-        <ToadMascot size={100} message="Welcome to your Ribbit Reserve!" />
-        <HeaderText>
-          <Heading>Ribbit Reserve</Heading>
-          <Subheading>Track and redeem your rewards</Subheading>
-        </HeaderText>
-      </HeaderSection>
-      
-      <Tabs>
-        <Tab 
-          active={activeTab === 'money'} 
-          onClick={() => handleTabChange('money')}
-        >
-          Money 💰
-        </Tab>
-        <Tab 
-          active={activeTab === 'points'} 
-          onClick={() => handleTabChange('points')}
-        >
-          Points 🎮
-        </Tab>
-        <Tab 
-          active={activeTab === 'special'} 
-          onClick={() => handleTabChange('special')}
-        >
-          Special Rewards 🎁
-        </Tab>
-      </Tabs>
-      
-      <TabContent>
-        {activeTab === 'money' && (
-          <>
-            <BalanceCard color="var(--primary-color)">
-              <BalanceLabel>Current Balance</BalanceLabel>
-              <BalanceAmount>${moneyBalance.toFixed(2)}</BalanceAmount>
-              <BalanceInfo>Interest Rate: {(interestRate * 100).toFixed(1)}%</BalanceInfo>
-            </BalanceCard>
-            
-            <Form onSubmit={handleRedeemMoney}>
-              <FormRow>
-                <FormGroup>
-                  <label htmlFor="redeemAmount">Amount to Redeem</label>
-                  <input
-                    id="redeemAmount"
-                    type="number"
-                    min="0.01"
-                    step="0.01"
-                    value={redeemAmount}
-                    onChange={(e) => setRedeemAmount(e.target.value)}
-                    placeholder="Enter amount"
-                    disabled={redeeming}
-                  />
-                </FormGroup>
-                <SubmitButton type="submit" disabled={redeeming || moneyBalance <= 0}>
-                  {redeeming ? 'Redeeming...' : 'Redeem Money'}
-                </SubmitButton>
-              </FormRow>
-            </Form>
-            
-            <TransactionHistory>
-              <h3>Recent Transactions</h3>
-              {/* Mock transaction history - replace with actual data */}
-              <TransactionList>
-                <TransactionItem>
-                  <TransactionDetails>
-                    <TransactionTitle>Task Completed: Clean Room</TransactionTitle>
-                    <TransactionDate>April 1, 2025</TransactionDate>
-                  </TransactionDetails>
-                  <TransactionAmount type="credit">+$5.00</TransactionAmount>
-                </TransactionItem>
-                <TransactionItem>
-                  <TransactionDetails>
-                    <TransactionTitle>Interest Earned</TransactionTitle>
-                    <TransactionDate>March 31, 2025</TransactionDate>
-                  </TransactionDetails>
-                  <TransactionAmount type="credit">+$0.25</TransactionAmount>
-                </TransactionItem>
-                <TransactionItem>
-                  <TransactionDetails>
-                    <TransactionTitle>Money Redeemed</TransactionTitle>
-                    <TransactionDate>March 28, 2025</TransactionDate>
-                  </TransactionDetails>
-                  <TransactionAmount type="debit">-$10.00</TransactionAmount>
-                </TransactionItem>
-              </TransactionList>
-            </TransactionHistory>
-          </>
-        )}
+  // Wrap everything in a try-catch to prevent white screen on errors
+  try {
+    // Safely extract data from rewardBank with additional error handling
+    const moneyBalance = rewardBank?.money?.balance || 0;
+    const interestRate = rewardBank?.money?.interestRate || 0;
+    const pointsBalance = rewardBank?.points?.balance || 0;
+    
+    // Ensure specialRewards is always an array, even if rewardBank is null or specialRewards is undefined
+    let specialRewards = [];
+    
+    try {
+      if (rewardBank && Array.isArray(rewardBank.specialRewards)) {
+        // Deep clone the array to avoid any reference issues
+        specialRewards = JSON.parse(JSON.stringify(rewardBank.specialRewards));
+      }
+    } catch (err) {
+      console.error('Error processing special rewards:', err);
+      // Fallback to empty array
+      specialRewards = [];
+    }
+    
+    // Log the special rewards for debugging
+    console.log('Special rewards in RibbitReserve:', specialRewards);
+    
+    // Filter special rewards by status with additional safety checks
+    const availableSpecialRewards = specialRewards.filter(reward => {
+      try {
+        return reward && typeof reward === 'object' && reward.status === 'available';
+      } catch (err) {
+        console.error('Error filtering available reward:', err, reward);
+        return false;
+      }
+    });
+    
+    const pendingSpecialRewards = specialRewards.filter(reward => {
+      try {
+        return reward && typeof reward === 'object' && reward.status === 'pending_redemption';
+      } catch (err) {
+        console.error('Error filtering pending reward:', err, reward);
+        return false;
+      }
+    });
+    
+    const redeemedSpecialRewards = specialRewards.filter(reward => {
+      try {
+        return reward && typeof reward === 'object' && reward.status === 'redeemed';
+      } catch (err) {
+        console.error('Error filtering redeemed reward:', err, reward);
+        return false;
+      }
+    });
+    
+    // Log filtered rewards for debugging
+    console.log('Available special rewards:', availableSpecialRewards);
+    console.log('Pending special rewards:', pendingSpecialRewards);
+    console.log('Redeemed special rewards:', redeemedSpecialRewards);
+    
+    return (
+      <ReserveContainer>
+        <HeaderSection>
+          <ToadMascot size={100} message="Welcome to your Ribbit Reserve!" />
+          <HeaderText>
+            <Heading>Ribbit Reserve</Heading>
+            <Subheading>Track and redeem your rewards</Subheading>
+          </HeaderText>
+        </HeaderSection>
         
-        {activeTab === 'points' && (
-          <>
-            <BalanceCard color="var(--accent-color)">
-              <BalanceLabel>Current Points</BalanceLabel>
-              <BalanceAmount>{pointsBalance}</BalanceAmount>
-              <BalanceInfo>Earn points by completing tasks</BalanceInfo>
-            </BalanceCard>
-            
-            <Form onSubmit={handleRedeemPoints}>
-              <FormRow>
-                <FormGroup>
-                  <label htmlFor="redeemPoints">Points to Redeem</label>
-                  <input
-                    id="redeemPoints"
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={redeemAmount}
-                    onChange={(e) => setRedeemAmount(e.target.value)}
-                    placeholder="Enter points"
-                    disabled={redeeming}
-                  />
-                </FormGroup>
-                <SubmitButton type="submit" disabled={redeeming || pointsBalance <= 0}>
-                  {redeeming ? 'Redeeming...' : 'Redeem Points'}
-                </SubmitButton>
-              </FormRow>
-            </Form>
-            
-            <TransactionHistory>
-              <h3>Recent Transactions</h3>
-              {/* Mock transaction history - replace with actual data */}
-              <TransactionList>
-                <TransactionItem>
-                  <TransactionDetails>
-                    <TransactionTitle>Task Completed: Take Out Trash</TransactionTitle>
-                    <TransactionDate>April 2, 2025</TransactionDate>
-                  </TransactionDetails>
-                  <TransactionAmount type="credit">+50 points</TransactionAmount>
-                </TransactionItem>
-                <TransactionItem>
-                  <TransactionDetails>
-                    <TransactionTitle>Points Redeemed</TransactionTitle>
-                    <TransactionDate>March 30, 2025</TransactionDate>
-                  </TransactionDetails>
-                  <TransactionAmount type="debit">-100 points</TransactionAmount>
-                </TransactionItem>
-              </TransactionList>
-            </TransactionHistory>
-          </>
-        )}
+        <Tabs>
+          <Tab 
+            active={activeTab === 'money'} 
+            onClick={() => handleTabChange('money')}
+          >
+            Money 💰
+          </Tab>
+          <Tab 
+            active={activeTab === 'points'} 
+            onClick={() => handleTabChange('points')}
+          >
+            Points 🎮
+          </Tab>
+          <Tab 
+            active={activeTab === 'special'} 
+            onClick={() => handleTabChange('special')}
+          >
+            Special Rewards 🎁
+          </Tab>
+        </Tabs>
         
-        {activeTab === 'special' && (
-          <>
-            <h3>Available Special Rewards</h3>
-            <RewardList>
-              {availableSpecialRewards.length > 0 ? (
-                availableSpecialRewards.map(reward => (
-                  <RewardCard key={reward.id}>
-                    <RewardTitle>{reward.title}</RewardTitle>
-                    <RewardDescription>{reward.description}</RewardDescription>
-                    <RewardButton
-                      onClick={() => handleRedeemSpecial(reward.id)}
-                      disabled={redeemingRewardId === reward.id}
-                    >
-                      {redeemingRewardId === reward.id ? 'Redeeming...' : 'Redeem Reward'}
-                    </RewardButton>
-                  </RewardCard>
-                ))
-              ) : (
-                <EmptyState>No special rewards in your lily pad yet! Complete more tasks to earn some toad-ally awesome rewards!</EmptyState>
+        <TabContent>
+          {activeTab === 'money' && (
+            <>
+              <BalanceCard color="var(--primary-color)">
+                <BalanceLabel>Current Balance</BalanceLabel>
+                <BalanceAmount>${moneyBalance.toFixed(2)}</BalanceAmount>
+                <BalanceInfo>Interest Rate: {(interestRate * 100).toFixed(1)}%</BalanceInfo>
+              </BalanceCard>
+              
+              <BalanceCard color="var(--success-color)">
+                <BalanceLabel>Balance with Interest</BalanceLabel>
+                <BalanceAmount>${(moneyBalance * (1 + interestRate)).toFixed(2)}</BalanceAmount>
+                <BalanceInfo>You'll earn ${(moneyBalance * interestRate).toFixed(2)} in interest!</BalanceInfo>
+              </BalanceCard>
+              
+              <TransactionHistory>
+                <h3>Recent Transactions</h3>
+                {/* Mock transaction history - replace with actual data */}
+                <TransactionList>
+                  <TransactionItem>
+                    <TransactionDetails>
+                      <TransactionTitle>Task Completed: Clean Room</TransactionTitle>
+                      <TransactionDate>April 1, 2025</TransactionDate>
+                    </TransactionDetails>
+                    <TransactionAmount type="credit">+$5.00</TransactionAmount>
+                  </TransactionItem>
+                  <TransactionItem>
+                    <TransactionDetails>
+                      <TransactionTitle>Interest Earned</TransactionTitle>
+                      <TransactionDate>March 31, 2025</TransactionDate>
+                    </TransactionDetails>
+                    <TransactionAmount type="credit">+$0.25</TransactionAmount>
+                  </TransactionItem>
+                  <TransactionItem>
+                    <TransactionDetails>
+                      <TransactionTitle>Money Dispensed</TransactionTitle>
+                      <TransactionDate>March 28, 2025</TransactionDate>
+                    </TransactionDetails>
+                    <TransactionAmount type="debit">-$10.00</TransactionAmount>
+                  </TransactionItem>
+                </TransactionList>
+              </TransactionHistory>
+            </>
+          )}
+          
+          {activeTab === 'points' && (
+            <>
+              <BalanceCard color="var(--accent-color)">
+                <BalanceLabel>Current Points</BalanceLabel>
+                <BalanceAmount>{pointsBalance}</BalanceAmount>
+                <BalanceInfo>Earn points by completing tasks</BalanceInfo>
+              </BalanceCard>
+              
+              <TransactionHistory>
+                <h3>Recent Transactions</h3>
+                {/* Mock transaction history - replace with actual data */}
+                <TransactionList>
+                  <TransactionItem>
+                    <TransactionDetails>
+                      <TransactionTitle>Task Completed: Take Out Trash</TransactionTitle>
+                      <TransactionDate>April 2, 2025</TransactionDate>
+                    </TransactionDetails>
+                    <TransactionAmount type="credit">+50 points</TransactionAmount>
+                  </TransactionItem>
+                  <TransactionItem>
+                    <TransactionDetails>
+                      <TransactionTitle>Points Dispensed</TransactionTitle>
+                      <TransactionDate>March 30, 2025</TransactionDate>
+                    </TransactionDetails>
+                    <TransactionAmount type="debit">-100 points</TransactionAmount>
+                  </TransactionItem>
+                </TransactionList>
+              </TransactionHistory>
+            </>
+          )}
+          
+          {activeTab === 'special' && (
+            <>
+              <h3>Available Special Rewards</h3>
+              <RewardList>
+                {availableSpecialRewards.length > 0 ? (
+                  availableSpecialRewards.map(reward => (
+                    <RewardCard key={reward.id}>
+                      <RewardTitle>{reward.title}</RewardTitle>
+                      <RewardDescription>{reward.description}</RewardDescription>
+                    </RewardCard>
+                  ))
+                ) : (
+                  <EmptyState>No special rewards in your lily pad yet! Complete more tasks to earn some toad-ally awesome rewards!</EmptyState>
+                )}
+              </RewardList>
+              
+              {pendingSpecialRewards.length > 0 && (
+                <>
+                  <h3>Pending Redemption</h3>
+                  <RewardList>
+                    {pendingSpecialRewards.map(reward => (
+                      <RewardCard key={reward.id}>
+                        <RewardTitle>{reward.title}</RewardTitle>
+                        <RewardDescription>{reward.description}</RewardDescription>
+                        <div style={{ color: 'var(--text-color-light)', textAlign: 'center', padding: '0.5rem' }}>
+                          Waiting for Approval
+                        </div>
+                      </RewardCard>
+                    ))}
+                  </RewardList>
+                </>
               )}
-            </RewardList>
-            
-            {pendingSpecialRewards.length > 0 && (
-              <>
-                <h3>Pending Redemption</h3>
-                <RewardList>
-                  {pendingSpecialRewards.map(reward => (
-                    <RewardCard key={reward.id}>
-                      <RewardTitle>{reward.title}</RewardTitle>
-                      <RewardDescription>{reward.description}</RewardDescription>
-                      <RewardButton disabled>
-                        Waiting for Approval
-                      </RewardButton>
-                    </RewardCard>
-                  ))}
-                </RewardList>
-              </>
-            )}
-            
-            {redeemedSpecialRewards.length > 0 && (
-              <>
-                <h3>Redeemed Rewards</h3>
-                <RewardList>
-                  {redeemedSpecialRewards.map(reward => (
-                    <RewardCard key={reward.id}>
-                      <RewardTitle>{reward.title}</RewardTitle>
-                      <RewardDescription>{reward.description}</RewardDescription>
-                      <RewardButton redeemed>
-                        Redeemed ✓
-                      </RewardButton>
-                    </RewardCard>
-                  ))}
-                </RewardList>
-              </>
-            )}
-          </>
-        )}
-      </TabContent>
-    </ReserveContainer>
-  );
+              
+              {redeemedSpecialRewards.length > 0 && (
+                <>
+                  <h3>Redeemed Rewards</h3>
+                  <RewardList>
+                    {redeemedSpecialRewards.map(reward => (
+                      <RewardCard key={reward.id}>
+                        <RewardTitle>{reward.title}</RewardTitle>
+                        <RewardDescription>{reward.description}</RewardDescription>
+                        <div style={{ color: 'var(--success-color)', textAlign: 'center', padding: '0.5rem' }}>
+                          Redeemed ✓
+                        </div>
+                      </RewardCard>
+                    ))}
+                  </RewardList>
+                </>
+              )}
+            </>
+          )}
+        </TabContent>
+      </ReserveContainer>
+    );
+  } catch (error) {
+    console.error('Error rendering RibbitReserve:', error);
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center' }}>
+        <h2>Something went wrong</h2>
+        <p>We're having trouble loading your rewards. Please try refreshing the page.</p>
+        <button 
+          onClick={() => window.location.reload()} 
+          style={{ 
+            padding: '0.75rem 1.5rem', 
+            backgroundColor: 'var(--primary-color)', 
+            color: 'white', 
+            border: 'none', 
+            borderRadius: '0.5rem', 
+            cursor: 'pointer',
+            marginTop: '1rem'
+          }}
+        >
+          Refresh Page
+        </button>
+      </div>
+    );
+  }
 };
 
 export default RibbitReserve;

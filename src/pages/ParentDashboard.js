@@ -117,12 +117,14 @@ const Tabs = styled.div`
 
 // Styled tab
 const Tab = styled.button`
-  padding: 0.5rem 1rem;
+  padding: 0.75rem 1.5rem;
   background-color: ${props => props.active ? 'var(--background-light)' : 'transparent'};
   color: ${props => props.active ? 'var(--primary-color)' : 'var(--text-color)'};
   border: none;
-  border-bottom: 2px solid ${props => props.active ? 'var(--primary-color)' : 'transparent'};
-  font-weight: ${props => props.active ? '600' : '400'};
+  border-bottom: 3px solid ${props => props.active ? 'var(--primary-color)' : 'transparent'};
+  font-weight: ${props => props.active ? '700' : '500'};
+  font-size: 1.1rem;
+  font-family: var(--font-family-fun);
   cursor: pointer;
   transition: all 0.2s;
   margin-bottom: -2px;
@@ -130,6 +132,8 @@ const Tab = styled.button`
   
   &:hover {
     color: var(--primary-color);
+    background-color: ${props => props.active ? 'var(--background-light)' : 'rgba(255, 255, 255, 0.1)'};
+    transform: translateY(-2px);
   }
 `;
 
@@ -305,46 +309,21 @@ const ParentDashboard = () => {
           
           <DashboardSection>
             <SectionHeader>
-              <SectionTitle>Tadpole Tasks</SectionTitle>
+              <SectionTitle>Tasks Summary</SectionTitle>
               <SectionIcon>📋</SectionIcon>
             </SectionHeader>
             
             <SectionContent>
-              {activeTasks.length > 0 ? (
-                <TaskList>
-                  {activeTasks.map(task => (
-                    <TaskItem key={task.id}>
-                      <div>{task.title}</div>
-                      <TaskStatus status={task.status}>
-                        {task.status.charAt(0).toUpperCase() + task.status.slice(1)}
-                      </TaskStatus>
-                    </TaskItem>
-                  ))}
-                </TaskList>
-              ) : (
-                <EmptyState>No active tasks for {activeChild?.firstName}. Create some lily pad tasks!</EmptyState>
-              )}
-            </SectionContent>
-            
-            <SectionHeader>
-              <SectionTitle>Completed Tasks</SectionTitle>
-            </SectionHeader>
-            
-            <SectionContent>
-              {completedTasks.length > 0 ? (
-                <TaskList>
-                  {completedTasks.slice(0, 3).map(task => (
-                    <TaskItem key={task.id}>
-                      <div>{task.title}</div>
-                      <TaskStatus status={task.status}>
-                        {task.status.charAt(0).toUpperCase() + task.status.slice(1)}
-                      </TaskStatus>
-                    </TaskItem>
-                  ))}
-                </TaskList>
-              ) : (
-                <EmptyState>No completed tasks yet for {activeChild?.firstName}.</EmptyState>
-              )}
+              <RewardSummary>
+                <RewardCategory>
+                  <RewardLabel>Pending Tasks</RewardLabel>
+                  <RewardValue>{activeTasks.length}</RewardValue>
+                </RewardCategory>
+                <RewardCategory>
+                  <RewardLabel>Completed Tasks</RewardLabel>
+                  <RewardValue>{completedTasks.length}</RewardValue>
+                </RewardCategory>
+              </RewardSummary>
             </SectionContent>
             
             <SectionFooter>
